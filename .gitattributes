@@ -1,0 +1,15 @@
+# GitHub memorial repo: keep LF for scripts so Ubuntu/ROS can run them directly
+# even when edited on Windows.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.rviz text eol=lf
+*.conf text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.png binary
+*.bag binary
+*.pgm binary

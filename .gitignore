@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Maps / bags / logs (local run products, don't commit)
+*.pgm
+*.yaml.bak
+*.bag
+*.log
+/tmp/
+
+# RViz / rqt local state
+*.rviz.bak
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local overrides (example only, never commit real IPs)
+# NOTE: this ignores a repo-local .config/ dir only.
+# The real pin file ~/.config/transbot-console.conf lives outside the repo.
+.config/
+*.local

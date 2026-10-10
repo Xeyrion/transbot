@@ -1,0 +1,8 @@
+# Python deps (control PC, ROS Melodic, Python 3)
+# Tested on: Ubuntu 18.04 + ROS Melodic + Python 3.6 (control PC VM).
+# ROS packages (apt): ros-melodic-teleop-twist-keyboard, ros-melodic-cv-bridge,
+#   python3-tk, rqt-image-view, rviz
+# Versions intentionally unpinned: memorial snapshot, install latest py3 wheels.
+opencv-python
+numpy
+Pillow
