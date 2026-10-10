@@ -19,7 +19,8 @@ How `env.sh` resolves the robot IP: `$ROBOT_IP` → `~/.config/transbot-console.
 
 ```bash
 bash tasks/01-keyboard-drive.sh
-# i forward, , back, j/l turn in place, k stop, q/z speed +/-
+# teleop_twist_keyboard full keymap: u/i/o forward, j/k/l left/stop/right,
+# m/,/. backward, q/z speed +/-, w/x linear only, e/c angular only
 ```
 
 Notes:
