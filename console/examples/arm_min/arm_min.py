@@ -20,7 +20,7 @@ from transbot_msgs.srv import RobotArm
 
 # 控制端统一限位（与 transbot_gui.py 一致）：
 # id7 0~225，id8 15~240，id9 60~180。
-# 旧手册的 id8 30~270 不再采用；GUI/URDF/真机 agent 都用这一组。
+# GUI、URDF、真机 agent 都用这一组。
 LIMITS = {7: (0, 225), 8: (15, 240), 9: (60, 180)}
 
 

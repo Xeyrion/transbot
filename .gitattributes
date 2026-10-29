@@ -11,5 +11,6 @@ LICENSE text eol=lf
 .gitattributes text eol=lf
 .gitignore text eol=lf
 *.png binary
+*.gif binary
 *.bag binary
 *.pgm binary

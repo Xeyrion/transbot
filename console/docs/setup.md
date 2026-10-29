@@ -30,7 +30,7 @@ Notes:
 ## 3. Arm / lights / buzzer / gimbal
 
 ```bash
-python3 scripts/demo_actions.py   # showroom demo, base never moves
+python3 scripts/demo_actions.py   # light / buzzer / gimbal / arm demo, base never moves
 python3 scripts/arm_teleop.py     # left hand: q/z j1, w/x j2, e/c gripper, r/v gimbal, s home
 python3 scripts/arm_probe.py      # self-test with /CurrentAngle readback
 bash run_gui.sh                   # full GUI: sliders + readback + effects + video

@@ -27,5 +27,8 @@ Thumbs.db
 .config/
 *.local
 
+# Local notes / archived material (never published)
+_local/
+
 # Local agent workspace / scratch (not part of the project)
 .workbuddy-ai/
