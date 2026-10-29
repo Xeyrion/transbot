@@ -4,7 +4,7 @@
 # Health check: network + ROS topics/services/nodes.
 #
 # Usage:
-#   bash check_robot.sh          # from repo root
+#   bash check_robot.sh
 #   bash tasks/00-health-check.sh
 # ============================================================
 

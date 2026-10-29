@@ -13,14 +13,13 @@ source ./env.sh
 rostopic echo /voltage -n 1   # a voltage reading means you are connected
 ```
 
-How `env.sh` resolves the robot IP: `$ROBOT_IP` → `~/.config/transbot-console.conf` → AP default → mDNS hostname. It then picks the local NIC address on the robot's subnet for `ROS_IP`/`ROS_HOSTNAME`. To pin an IP permanently, write it into the config file.
+How `env.sh` resolves the robot IP: `$ROBOT_IP` → `~/.config/transbot_console.conf` → AP default → mDNS hostname. It then picks the local NIC address on the robot's subnet for `ROS_IP`/`ROS_HOSTNAME`. To pin an IP permanently, write it into the config file.
 
 ## 2. Drive the base
 
 ```bash
 bash tasks/01-keyboard-drive.sh
-# teleop_twist_keyboard full keymap: u/i/o forward, j/k/l left/stop/right,
-# m/,/. backward, q/z speed +/-, w/x linear only, e/c angular only
+# i forward, , back, j/l turn in place, k stop, q/z speed +/-
 ```
 
 Notes:
@@ -34,7 +33,7 @@ Notes:
 python3 scripts/demo_actions.py   # showroom demo, base never moves
 python3 scripts/arm_teleop.py     # left hand: q/z j1, w/x j2, e/c gripper, r/v gimbal, s home
 python3 scripts/arm_probe.py      # self-test with /CurrentAngle readback
-bash gui/run.sh                   # full GUI: sliders + readback + effects + video
+bash run_gui.sh                   # full GUI: sliders + readback + effects + video
 ```
 
 ## 4. Cameras
@@ -62,4 +61,4 @@ bash tasks/03-view-mapping.sh   # rviz with Fixed Frame=map, Map+laser preset
 | No `/voltage` | robot still booting / serial busy | wait 1 min, check base driver node is up |
 | Keyboard drive doesn't move | wrong `cmd_vel` topic | use `teleop_twist_keyboard` or add `cmd_vel:=/cmd_vel` |
 | New network, robot unreachable | robot got a new DHCP IP (STA mode) | re-run `source ./env.sh` (mDNS re-resolves); or set `ROBOT_IP=` manually |
-| Want a fixed IP | auto-discovery feels uncontrollable | write `ROBOT_IP=<ip>` into `~/.config/transbot-console.conf` |
+| Want a fixed IP | auto-discovery feels uncontrollable | write `ROBOT_IP=<ip>` into `~/.config/transbot_console.conf` |

@@ -12,7 +12,7 @@ rospy.init_node('arm_test', anonymous=True)
 pub_arm = rospy.Publisher('/TargetAngle', Arm, queue_size=10)
 
 # NOTE: HOME/SAFE 是探针用的保守中位（保证三关节都能 ±20° 活动），
-# 不是 URDF 全行程。URDF 全行程见 gui/app.py ARM_LIMITS：
+# 不是 URDF 全行程。URDF 全行程见 transbot_gui.py ARM_LIMITS：
 # base 0-225° / lift 15-240° / gripper 60-180°。
 HOME = {7: 45.0, 8: 45.0, 9: 45.0}
 

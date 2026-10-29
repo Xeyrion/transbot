@@ -49,7 +49,7 @@ print("== 3. gimbal sweep (yaw id1)")
 servo(1, 60); servo(1, 90); servo(1, 120); servo(1, 90)
 
 print("== 4. arm: rotate -> lift -> open/close claw -> home")
-# All angles within URDF limits (cf. gui/app.py ARM_LIMITS):
+# All angles within URDF limits (cf. transbot_gui.py ARM_LIMITS):
 # base id7 0-225° (90, 191), lift id8 15-240° (100, 50), gripper id9 60-180° (150, 70, 90).
 arm([(7, 90, 600), (8, 100, 700), (9, 150, 400)], wait=1.6)
 arm([(9, 70, 400)], wait=1.2)

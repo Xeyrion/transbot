@@ -9,7 +9,7 @@
 
 - Velocity command loop: 20 Hz; auto-brake after 0.5 s (keyboard teleop) to 5 s (GUI) with no input; brake-on-window-close and brake-on-exit.
 - Hard caps in the GUI/teleop: linear 0.4 m/s, angular 2.0 rad/s. New commands preempt in-flight ones.
-- Arm slider limits follow the URDF: base 0–225°, lift 15–240°, gripper 60–180°; gimbal yaw 60–120°.
+- Arm slider limits follow the confirmed control range (GUI/real robot), not the old URDF: base 0–225°, lift 15–240°, gripper 60–180°; gimbal yaw 60–120°.
 
 ## Arm readback
 

@@ -7,7 +7,7 @@ from geometry_msgs.msg import Twist
 from transbot_msgs.msg import Arm, Joint, PWMServo
 from transbot_msgs.srv import RobotArm, RobotArmRequest
 
-# ---------- 机械臂关节(舵机 id)，与 gui/app.py ARM_LIMITS / URDF 保持一致 ----------
+# ---------- 机械臂关节(舵机 id)，与 transbot_gui.py ARM_LIMITS / URDF 保持一致 ----------
 LIMITS = {
     'j1': (0,   225),   # id 7  关节1(底座摆动)，URDF arm_joint1
     'j2': (15,  240),   # id 8  关节2(升降)，URDF arm_joint2
