@@ -138,8 +138,8 @@ STRINGS = {
         '应用速度': 'Apply Speed',
         '速度参数对已播放的特效立即生效；'
         '“电量显示”为静态效果，速度参数对其无视觉影响':
-            'The speed applies immediately to the running effect. '
-            '"Battery Display" is static and is not affected by speed.',
+            'Applies to the running effect at once; "Battery Display" is '
+            'static.',
         '蜂鸣器': 'Buzzer',
         '短鸣 0.3 s': 'Short beep 0.3 s',
         '长鸣 2 s': 'Long beep 2 s',
@@ -289,8 +289,8 @@ STRINGS = {
             'Save Map (enabled while mapping; master copy stays on the robot)',
         '地图名': 'Map Name',
         '保存地图': 'Save Map',
-        '允许覆盖同名地图': 'Allow overwriting an existing map',
-        '同时下载到本机备份': 'Also download a backup to this host',
+        '允许覆盖同名地图': 'Allow overwrite',
+        '同时下载到本机备份': 'Also back up locally',
         '机器人目录：': 'Robot directory: ',
         '查看存图（本地显示，不经过 ROS）':
             'View Saved Map (local display, no ROS topics involved)',
@@ -431,8 +431,7 @@ STRINGS = {
         # --- 语言切换 ---
         '界面语言': 'Interface Language',
         '切换语言只重建界面文字，运行日志与设备状态保持不变。':
-            'Switching the language rebuilds the interface text only; runtime '
-            'logs and device readings are preserved.',
+            'Only the interface text is rebuilt; logs and readings are kept.',
         '界面语言已切换为中文': 'Interface language switched to Chinese',
         '✗ 界面重建失败：%s': '✗ Failed to rebuild the interface: %s',
         '界面语言已切换为英文': 'Interface language switched to English',
@@ -448,6 +447,17 @@ def L(text):
 def T(d):
     """把 {key: 中文} 的名称表整体翻译，如关节名、指令名。"""
     return dict((k, L(v)) for k, v in d.items())
+
+
+def fit(text, minimum=0):
+    """按钮/标签的字符宽度，保证文字不被截断。
+
+    Tk 的 width 单位是"平均字符宽"，一个汉字约占两个单位。英文比中文长
+    （"长鸣 2 s" -> "Long beep 2 s"），写死 width 在英文下会被截成 "Running W…"，
+    所以按当前语言的实际文本算宽度。
+    """
+    units = sum(2 if ord(ch) > 0x2E80 else 1 for ch in text)
+    return max(int(minimum), units + 2)
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +697,6 @@ class RobotROS:
     #   j7 底座  0~225°
     #   j8 升降  15~240°
     #   j9 夹爪  60~180°（夹笔实测 158~160°）
-    # 旧 URDF 的 arm_joint1/2 换算只作历史对照，见 wallmark/docs/07 的 C7。
     # run_time 单位 ms（0 会被驱动 set_uart_servo_angle 直接丢弃）
     ARM_LIMITS = {7: (0, 225), 8: (15, 240), 9: (60, 180)}
     ARM_NAMES = {7: '底座 (id7)', 8: '升降 (id8)', 9: '夹爪 (id9)'}
@@ -726,7 +735,17 @@ class RobotROS:
                 proxy = rospy.ServiceProxy('/CurrentAngle', RobotArm)
                 self._arm_srv = proxy
             rospy.wait_for_service('/CurrentAngle', timeout=3.0)
-            return proxy(apply='')
+            # 舵机总线偶尔会漏答一个关节（驱动对 -1 直接跳过），单次读可能
+            # 只回来 2 个。重试到 3 个为止，保留关节最多的那次结果。
+            best = None
+            for _ in range(3):
+                resp = proxy(apply='')
+                joints = getattr(getattr(resp, 'RobotArm', resp), 'joint', [])
+                if best is None or len(joints) > best[0]:
+                    best = (len(joints), resp)
+                if best[0] >= 3:
+                    break
+            return best[1]
         except Exception:
             raise
 
@@ -1433,8 +1452,9 @@ class App:
     def _build_ui(self):
         R = self.root
         R.title(L('Transbot 全方位机器人控制台 — Yahboom'))
-        # 双图 1:1 显示需要 640x480 * 2 + 边距，初始给足宽度并允许自由缩放
-        R.geometry('1420x780')
+        # 双图 1:1 显示需要 640x480 * 2 + 边距，初始给足宽度并允许自由缩放；
+        # 高度 820 是为了让建图页底部的“紧急停止”在默认尺寸下也完整可见。
+        R.geometry('1420x820')
         R.minsize(1000, 660)
         R.configure(bg='#1e2228')
         ts = ttk.Style()
@@ -1578,19 +1598,21 @@ class App:
         pad = ttk.Frame(f)
         pad.pack(expand=True)
         g = {'padx': 12, 'pady': 12}
-        ttk.Button(pad, text=L('前进 0.5 m'), style='Green.TButton', width=12,
+        bw = max(fit(L(t)) for t in ('前进 0.5 m', '后退 0.5 m', '左转 45°',
+                                     '右转 45°', '左转 90°', '右转 90°', '停止'))
+        ttk.Button(pad, text=L('前进 0.5 m'), style='Green.TButton', width=bw,
                    command=lambda: self.cmd('forward', 0.5)).grid(row=0, column=1, **g)
-        ttk.Button(pad, text=L('左转 45°'), width=12,
+        ttk.Button(pad, text=L('左转 45°'), width=bw,
                    command=lambda: self.cmd('turn', 'L', 45)).grid(row=1, column=0, **g)
-        ttk.Button(pad, text=L('停止'), style='Red.TButton', width=12,
+        ttk.Button(pad, text=L('停止'), style='Red.TButton', width=bw,
                    command=lambda: self.cmd('stop')).grid(row=1, column=1, **g)
-        ttk.Button(pad, text=L('右转 45°'), width=12,
+        ttk.Button(pad, text=L('右转 45°'), width=bw,
                    command=lambda: self.cmd('turn', 'R', 45)).grid(row=1, column=2, **g)
-        ttk.Button(pad, text=L('后退 0.5 m'), width=12,
+        ttk.Button(pad, text=L('后退 0.5 m'), width=bw,
                    command=lambda: self.cmd('backward', -0.5)).grid(row=2, column=1, **g)
-        ttk.Button(pad, text=L('左转 90°'), width=12,
+        ttk.Button(pad, text=L('左转 90°'), width=bw,
                    command=lambda: self.cmd('turn', 'L', 90)).grid(row=0, column=0, **g)
-        ttk.Button(pad, text=L('右转 90°'), width=12,
+        ttk.Button(pad, text=L('右转 90°'), width=bw,
                    command=lambda: self.cmd('turn', 'R', 90)).grid(row=0, column=2, **g)
 
         ttk.Label(f, text=L('连续速度控制'), style='H.TLabel')\
@@ -1636,13 +1658,14 @@ class App:
         self._rgb_btns = {}
         # 第一行 4 个在 fx，第二行 3 个在 fx2；两个 Frame 各自从 row 0 排，
         # 否则第二组会出现一个空行（之前 i//4 让第二组落在 row=1）。
+        ew = max(fit(L(t)) for t, _ in self._EFFECTS)
         for i, (txt, eid) in enumerate(self._EFFECTS):
             if i < 4:
-                b = ttk.Button(fx, text=L(txt), width=9,
+                b = ttk.Button(fx, text=L(txt), width=ew,
                                command=lambda e=eid: self._set_rgb_effect(e))
                 b.grid(row=0, column=i, padx=4, pady=4)
             else:
-                b = ttk.Button(fx2, text=L(txt), width=9,
+                b = ttk.Button(fx2, text=L(txt), width=ew,
                                command=lambda e=eid: self._set_rgb_effect(e))
                 b.grid(row=0, column=i - 4, padx=4, pady=4)
             self._rgb_btns[eid] = b
@@ -1654,7 +1677,8 @@ class App:
         self._sp_speed = tk.Scale(sp, from_=1, to=10, orient='horizontal', length=180)
         self._sp_speed.set(5)
         self._sp_speed.pack(side='left', padx=8)
-        ttk.Button(sp, text=L('应用速度'), style='Green.TButton', width=12,
+        ttk.Button(sp, text=L('应用速度'), style='Green.TButton',
+                   width=fit(L('应用速度')),
                    command=self._apply_rgb_speed).pack(side='left', padx=(4, 0))
         self._lb_rgb_state = tk.StringVar(value='')
         ttk.Label(sp, textvariable=self._lb_rgb_state,
@@ -1667,11 +1691,12 @@ class App:
             .pack(anchor='w', padx=16, pady=(16, 4))
         bx = ttk.Frame(f)
         bx.pack(anchor='w', padx=16)
-        ttk.Button(bx, text=L('短鸣 0.3 s'), width=10,
+        bz = max(fit(L(t)) for t in ('短鸣 0.3 s', '长鸣 2 s', '停止鸣响'))
+        ttk.Button(bx, text=L('短鸣 0.3 s'), width=bz,
                    command=lambda: self.cmd('buz', 200, 0.3)).pack(side='left', padx=4)
-        ttk.Button(bx, text=L('长鸣 2 s'), width=10,
+        ttk.Button(bx, text=L('长鸣 2 s'), width=bz,
                    command=lambda: self.cmd('buz', 300, 2.0)).pack(side='left', padx=4)
-        ttk.Button(bx, text=L('停止鸣响'), style='Red.TButton', width=10,
+        ttk.Button(bx, text=L('停止鸣响'), style='Red.TButton', width=bz,
                    command=lambda: self.cmd('buz', 0)).pack(side='left', padx=4)
 
     # ---- 灯带：特效选择与速度下发 ----
@@ -1750,7 +1775,7 @@ class App:
             .pack(anchor='w', padx=16, pady=(20, 4))
         bx2 = ttk.Frame(f)
         bx2.pack(anchor='w', padx=16)
-        ttk.Button(bx2, text=L('读取当前角度'), width=14,
+        ttk.Button(bx2, text=L('读取当前角度'), width=fit(L('读取当前角度')),
                    command=lambda: self.cmd('read_arm')).pack(side='left', padx=(0, 8))
         ttk.Label(bx2, text=L('经 /CurrentAngle 服务读取关节 7/8/9 的实测角度，'
                               '结果自动回填至下方滑块')).pack(side='left')
@@ -1761,7 +1786,8 @@ class App:
             lo, hi = self.robot.ARM_LIMITS[jid]
             row = ttk.Frame(f)
             row.pack(fill='x', padx=16, pady=2)
-            ttk.Label(row, text=L(RobotROS.ARM_NAMES[jid]), width=10)\
+            ttk.Label(row, text=L(RobotROS.ARM_NAMES[jid]),
+                      width=max(fit(L(v)) for v in RobotROS.ARM_NAMES.values()))\
                 .pack(side='left')
             sl = tk.Scale(row, from_=lo, to=hi, resolution=1, orient='horizontal',
                           length=300, showvalue=True)
@@ -1771,7 +1797,7 @@ class App:
                        command=lambda j=jid: self._jog_arm(j, -1)).pack(side='left')
             ttk.Button(row, text='+', width=3,
                        command=lambda j=jid: self._jog_arm(j, +1)).pack(side='left')
-            ttk.Button(row, text=L('发送'), width=8, style='Green.TButton',
+            ttk.Button(row, text=L('发送'), width=fit(L('发送')), style='Green.TButton',
                        command=lambda j=jid: self._send_arm_joint(j)).pack(side='left', padx=(2, 0))
         # 滑块初值不对应任何标准姿态：连接建立后会自动读取实测角度并回填，
         # 因此初值取限位下限，发送前建议先确认读数。
@@ -1977,8 +2003,8 @@ class App:
         self._map_btns = {}
         B = self._map_btns
 
-        def _btn(parent, key, text, cmd, style=None, width=14):
-            b = ttk.Button(parent, text=text, width=width, command=cmd)
+        def _btn(parent, key, text, cmd, style=None, width=None):
+            b = ttk.Button(parent, text=text, width=width or fit(text), command=cmd)
             if style:
                 b.configure(style=style)
             b.pack(side='left', padx=4)
@@ -1995,7 +2021,7 @@ class App:
 
         # 2. 在线建图
         ttk.Label(f, text=L('在线建图（gmapping，跑在机器人端）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(16, 4))
+                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
         r2 = ttk.Frame(f)
         r2.pack(anchor='w', padx=16)
         _btn(r2, 'map_start', L('开始建图'), self._mn_map_start,
@@ -2006,18 +2032,16 @@ class App:
 
         # 3. 实时查看（rviz 子进程，与建图/相机驱动状态无关，可随时开）
         ttk.Label(f, text=L('实时查看'), style='H.TLabel')\
-            .pack(anchor='w', padx=16, pady=(16, 4))
+            .pack(anchor='w', padx=16, pady=(10, 4))
         r3 = ttk.Frame(f)
         r3.pack(anchor='w', padx=16)
-        _btn(r3, 'rviz_map', L('RViz 看建图'), lambda: self._mn_rviz('map'),
-             width=16)
-        _btn(r3, 'rviz_cam', L('RViz 看相机'), lambda: self._mn_rviz('cam'),
-             width=16)
+        _btn(r3, 'rviz_map', L('RViz 看建图'), lambda: self._mn_rviz('map'))
+        _btn(r3, 'rviz_cam', L('RViz 看相机'), lambda: self._mn_rviz('cam'))
         _btn(r3, 'rviz_close', L('关闭 RViz'), self._mn_rviz_close)
 
         # 4. 保存地图（仅建图中可点）
         ttk.Label(f, text=L('保存地图（仅建图中可点，正本存机器人）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(16, 4))
+                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
         r4 = ttk.Frame(f)
         r4.pack(anchor='w', padx=16)
         ttk.Label(r4, text=L('地图名')).pack(side='left')
@@ -2034,9 +2058,9 @@ class App:
 
         # 5/6. 查看存图 + 自主导航（共用下拉框）
         ttk.Label(f, text=L('查看存图（本地显示，不经过 ROS）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(16, 4))
+                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
         ttk.Label(f, text=L('自主导航（跑在机器人端，需先停止建图）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(16, 4))
+                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
         r6 = ttk.Frame(f)
         r6.pack(anchor='w', padx=16)
         ttk.Label(r6, text=L('地图')).pack(side='left')
@@ -2055,7 +2079,7 @@ class App:
         # 7. 安全（复用底盘制动）
         ttk.Button(f, text=L('紧急停止'), style='Red.TButton',
                    command=lambda: self.cmd('stop'))\
-            .pack(anchor='w', padx=16, pady=(20, 8))
+            .pack(anchor='w', padx=16, pady=(12, 6))
         self._sync_map_buttons()
 
     def _mn_state_get(self):
@@ -2423,7 +2447,7 @@ class App:
         info.pack(fill='x', padx=16, pady=(0, 6))
         # 用 readonly Entry 展示：原生支持鼠标选中 + Ctrl+C
         def _row(r, title, var):
-            ttk.Label(info, text=title, width=10).grid(row=r, column=0, sticky='w', pady=2)
+            ttk.Label(info, text=title).grid(row=r, column=0, sticky='w', pady=2)
             e = ttk.Entry(info, textvariable=var, state='readonly', width=52)
             e.grid(row=r, column=1, sticky='we', padx=(4, 4), pady=2)
             e.bind('<Button-1>', lambda ev, v=var: self._copy_text(
@@ -2801,15 +2825,19 @@ class App:
                     time.sleep(0.3)
                 rospy.Subscriber('/odom', nav_msgs.msg.Odometry, self._on_odom)
                 rospy.Subscriber('/voltage', Battery, self._on_volt)
-                # 轮询节点数。用 rospy.Master 直接问 master，
-                # 不再 fork `rosnode list` 子进程（每 5 秒一个进程，浪费且会卡）。
+                # 轮询节点数。直接问 master，不再 fork `rosnode list`
+                # 子进程（每 5 秒一个进程，浪费且会卡）。
+                # rospy 没有 Master 类，正确入口是 get_master()。
                 while not rospy.is_shutdown():
                     try:
-                        code, msg_, _ = rospy.Master(NODE).getSystemState()
+                        code, _msg, state = rospy.get_master().getSystemState()
                         if code == 1:
-                            n = len([x for x in msg_[0] if str(x).startswith('/')])
+                            names = set()
+                            for group in state:
+                                for _topic, nodes in group:
+                                    names.update(nodes)
                             with self._cache_lock:
-                                self._cache['nodes'] = '%d' % n
+                                self._cache['nodes'] = '%d' % len(names)
                     except Exception:
                         pass
                     time.sleep(5)
