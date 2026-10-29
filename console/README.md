@@ -60,7 +60,7 @@ accepted as legacy names.
 ## Layout
 
 ```
-transbot-remote-console/
+console/
 ├── env.sh                # robot IP discovery + ROS_MASTER_URI / ROS_IP
 ├── run_gui.sh            # GUI launcher (preflight + master probe + exec)
 ├── transbot_gui.py       # tkinter console (6 tabs)
