@@ -47,10 +47,12 @@ The GUI image panel is off by default to save WiFi bandwidth and falls back acro
 
 ## 5. Mapping / navigation (run on the robot, view from here)
 
-Mapping and navigation must run **on the robot** (stable `/scan`+`/odom` access, no WiFi packet loss). SSH to the robot and launch the vendor `transbot_nav` mapping/navigation there; use this repo only for visualization:
+Mapping and navigation must run **on the robot mainboard** (stable `/scan`+`/odom` access, the serial lidar device, no WiFi packet loss). SSH to the mainboard as `jetson` (a different account from the control PC) and launch the vendor `transbot_nav` mapping/navigation there; use this repo only for visualization:
 
 ```bash
-bash tasks/03-view-mapping.sh   # rviz with Fixed Frame=map, Map+laser preset
+ssh jetson@<robot-ip>            # mainboard, not the control PC
+bash tasks/10-mapping-ssh.sh     # prints the full command set, executes nothing
+bash tasks/03-view-mapping.sh    # back here: rviz with Fixed Frame=map
 ```
 
 ## 6. Troubleshooting

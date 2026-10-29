@@ -5,7 +5,7 @@ Remote control console for the Yahboom Transbot robot (ROS 1 Melodic), running o
 ![ROS Melodic](https://img.shields.io/badge/ROS-Melodic-blue) ![Python 3](https://img.shields.io/badge/Python-3-green) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
 
 ```
-Control PC (Ubuntu VM)              Robot (Transbot host, Ubuntu 18.04)
+Control PC (Ubuntu VM, x86_64)      Robot mainboard (Jetson Nano, aarch64)
 ┌─────────────────────┐   WiFi   ┌──────────────────────┐
 │ this repo            │ ◄──────► │ ROS master :11311     │
 │ env.sh + GUI/scripts │  topics  │ base / lidar / camera │
@@ -14,6 +14,19 @@ Control PC (Ubuntu VM)              Robot (Transbot host, Ubuntu 18.04)
 ```
 
 > ![GUI console](docs/images/gui-demo.png)
+
+**Two machines, not one.** The control PC and the robot mainboard are separate
+computers with separate accounts, and they are not interchangeable:
+
+| | Control PC (this repo) | Robot mainboard |
+|---|---|---|
+| Arch / OS | x86_64, Ubuntu 18.04 VM | aarch64, Ubuntu 18.04 / L4T (JetPack) |
+| SSH user | your own PC account | `jetson` |
+| Owns | GUI, teleop, rviz | `/dev/ttyTHS1`, `/dev/rplidar`, `/scan`, `/odom` |
+
+Anything that touches a serial device — base driver, lidar, mapping and
+navigation — must run **on the mainboard**. This repo only publishes topics and
+visualizes; see `tasks/10-mapping-ssh.sh` for the exact SSH commands.
 
 ## Highlights
 
