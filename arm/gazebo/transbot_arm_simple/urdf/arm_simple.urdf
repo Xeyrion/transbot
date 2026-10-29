@@ -1,0 +1,160 @@
+<?xml version="1.0"?>
+<!--
+  Simplest fixed-base 2R arm for Gazebo.  No wall, no floor model, no
+  safety logic: the two sliders map straight onto the two joints.
+
+  Geometry (measured installation of the real arm, NOT the vendor URDF):
+    j7 axis -> j8 axis : L1 = 10.0 cm   (tape measure, +/-0.5 cm)
+    j8 axis -> pen tip : L2 = 24.0 cm   (incl. pen, j9 ~ 159)
+    j7 axis in base_link: (12.9, 0, 0) cm
+  See CALIBRATION.md in the project root.  The vendor URDF says 8.285 cm,
+  but the arm was installed by hand and the measured value is authoritative.
+
+  Angle convention (fixed, no calibration file):
+    e1  = j7 - 95          link1 elevation; j7=95 -> first link horizontal
+    rel = j8 - 180         link2 *relative* angle; j8=180 -> collinear
+    e2  = e1 + rel = j7 + j8 - 275   link2 world elevation
+
+  URDF joints:
+    arm_joint1 = radians(j7 - 95)
+    arm_joint2 = radians(j8 - 180)
+  Both rotate about -Y; positive angle raises the link in the X-Z plane.
+
+  Keep this file ASCII-only: gazebo_ros spawn_model is Python 2 and can
+  fail with UnicodeEncodeError on non-ASCII URDF text.
+-->
+<robot name="transbot_arm_simple">
+
+  <!-- ============================================================ base -->
+  <link name="world"/>
+
+  <link name="base_link">
+    <inertial>
+      <mass value="5.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.08" rpy="0 0 0"/>
+  </joint>
+
+  <!-- No pedestal on purpose: the simple model keeps only the two links.
+       base_link is an invisible frame floating at z=8 cm; the j7 axis is
+       at world (0.129, 0, 0.08), exactly as in the measured installation. -->
+
+  <!-- ===================================================== link 1 (j7) -->
+  <link name="arm_link1">
+    <inertial>
+      <mass value="0.3"/>
+      <origin xyz="0.05 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.05 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.10 0.030 0.030"/></geometry>
+      <material name="arm_blue"><color rgba="0.10 0.35 0.90 1.0"/></material>
+    </visual>
+    <!-- No <collision>: kinematic pose viewer only. -->
+  </link>
+
+  <joint name="arm_joint1" type="revolute">
+    <parent link="base_link"/>
+    <child link="arm_link1"/>
+    <origin xyz="0.129 0 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <!-- j7 in [0, 225] deg  =>  q1 = j7 - 95 in [-95, 130] deg -->
+    <limit lower="-1.658063" upper="2.268928" effort="100" velocity="1.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <!-- ===================================================== link 2 (j8) -->
+  <link name="arm_link2">
+    <inertial>
+      <mass value="0.3"/>
+      <origin xyz="0.08857 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.08857 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.17714 0.025 0.025"/></geometry>
+      <material name="arm_orange"><color rgba="0.95 0.40 0.05 1.0"/></material>
+    </visual>
+    <!-- No <collision>: see arm_link1. -->
+  </link>
+
+  <joint name="arm_joint2" type="revolute">
+    <parent link="arm_link1"/>
+    <child link="arm_link2"/>
+    <origin xyz="0.10 0 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <!-- j8 in [15, 240]  =>  q2 = j8 - 180 in [-165, 60] deg -->
+    <limit lower="-2.879793" upper="1.047198" effort="100" velocity="1.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <!-- ============================================================ pen -->
+  <!-- pen link origin == pen tip, 0.24 m from the j8 axis. -->
+  <link name="pen">
+    <inertial>
+      <mass value="0.02"/>
+      <origin xyz="-0.03143 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual name="body">
+      <origin xyz="-0.03143 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.06286 0.012 0.012"/></geometry>
+      <material name="pen_white"><color rgba="0.95 0.95 0.95 1.0"/></material>
+    </visual>
+    <visual name="tip">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.010"/></geometry>
+      <material name="tip_red"><color rgba="0.90 0.05 0.05 1.0"/></material>
+    </visual>
+    <!-- No <collision>: see arm_link1. -->
+  </link>
+
+  <joint name="pen_joint" type="fixed">
+    <parent link="arm_link2"/>
+    <child link="pen"/>
+    <origin xyz="0.24 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link"><material>Gazebo/DarkGrey</material></gazebo>
+  <gazebo reference="arm_link1"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="arm_link2"><material>Gazebo/Orange</material></gazebo>
+  <gazebo reference="pen"><material>Gazebo/White</material></gazebo>
+
+  <!-- ==================================================== ros_control -->
+  <transmission name="arm1_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="arm_joint1">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="arm1_motor">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="arm2_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="arm_joint2">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="arm2_motor">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <gazebo>
+    <plugin name="ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/</robotNamespace>
+    </plugin>
+  </gazebo>
+
+</robot>

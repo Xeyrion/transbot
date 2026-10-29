@@ -1,0 +1,41 @@
+<!--
+  Simplest Gazebo scene: one 2R arm, nothing else.
+
+  Run:
+    roslaunch transbot_arm_simple arm_simple.launch
+    roslaunch transbot_arm_simple arm_simple.launch gui:=false
+-->
+<launch>
+  <arg name="gui" default="true"/>
+  <arg name="paused" default="false"/>
+  <arg name="init_pose" default="true"/>
+  <arg name="world" default="$(find transbot_arm_simple)/worlds/arm_simple.world"/>
+  <arg name="urdf" default="$(find transbot_arm_simple)/urdf/arm_simple.urdf"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world)"/>
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <param name="robot_description" textfile="$(arg urdf)"/>
+  <rosparam file="$(find transbot_arm_simple)/config/controllers.yaml" command="load"/>
+
+  <!-- Fixed-base arm. The URDF is already in world coordinates; spawn at origin. -->
+  <node pkg="gazebo_ros" type="spawn_model" name="spawn_arm"
+        args="-urdf -model transbot_arm_simple -param robot_description -x 0 -y 0 -z 0"/>
+
+  <node name="controller_spawner" pkg="controller_manager" type="spawner"
+        respawn="false" output="screen"
+        args="joint_state_controller arm_controller"/>
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+        type="robot_state_publisher"/>
+
+  <!-- Optional: move to the ready pose after controllers start. -->
+  <node name="arm_init_pose" pkg="transbot_arm_simple" type="set_pose_simple.py"
+        output="screen" if="$(arg init_pose)"/>
+</launch>

@@ -6,7 +6,7 @@ __pycache__/
 # Maps / bags / logs (local run products, don't commit)
 *.pgm
 # ...except the sample map shipped with the repo
-!maps/*.pgm
+!console/maps/*.pgm
 *.yaml.bak
 *.bag
 *.log

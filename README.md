@@ -1,113 +1,60 @@
-# Transbot Remote Console
+# Transbot
 
-Remote control console for the Yahboom Transbot robot (ROS 1 Melodic), running on a control PC over WiFi. All robot interaction goes through the ROS master on the robot — no code needs to be copied onto the robot.
+在 Yahboom Transbot 机器人（ROS 1 Melodic）上做的一组东西：一个 PC 端遥控台、一个机械臂模型与仿真环境、一个墙面标注的可行性研究。三者共用同一套几何口径和关节限位。
 
-![ROS Melodic](https://img.shields.io/badge/ROS-Melodic-blue) ![Python 3](https://img.shields.io/badge/Python-3-green) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
+![ROS Melodic](https://img.shields.io/badge/ROS-Melodic-blue) ![Python](https://img.shields.io/badge/Python-2%20%7C%203-green) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
 
-```
-Control PC (Ubuntu VM, x86_64)      Robot mainboard (Jetson Nano, aarch64)
-┌─────────────────────┐   WiFi   ┌──────────────────────┐
-│ this repo            │ ◄──────► │ ROS master :11311     │
-│ env.sh + GUI/scripts │  topics  │ base / lidar / camera │
-│ ROS_IP=<local>       │  services│ /arm stack preinstalled│
-└─────────────────────┘          └──────────────────────┘
-```
-
-> ![GUI console](docs/images/gui-demo.png)
-
-**Two machines, not one.** The control PC and the robot mainboard are separate
-computers with separate accounts, and they are not interchangeable:
-
-| | Control PC (this repo) | Robot mainboard |
+| 目录 | 是什么 | 一句话 |
 |---|---|---|
-| Arch / OS | x86_64, Ubuntu 18.04 VM | aarch64, Ubuntu 18.04 / L4T (JetPack) |
-| SSH user | your own PC account | `jetson` |
-| Owns | GUI, teleop, rviz | `/dev/ttyTHS1`, `/dev/rplidar`, `/scan`, `/odom` |
+| [`console/`](console/) | PC 端控制台 | 6 页签 tkinter GUI + 键盘遥控 + 体检脚本；连上 ROS master 就能开机器人 |
+| [`arm/`](arm/) | 机械臂模型与仿真 | 2R 臂的 Gazebo 场景 + 控制面板 + 真机 UDP 同步 + 画线几何 |
+| [`wallmark/`](wallmark/) | 墙面标注研究 | 机械臂夹笔画墙面裂缝：能力边界、关节标定、为什么只能画竖线 |
 
-Anything that touches a serial device — base driver, lidar, mapping and
-navigation — must run **on the mainboard**. This repo only publishes topics and
-visualizes; see `tasks/10-mapping-ssh.sh` for the exact SSH commands.
+![console 界面](console/docs/images/gui-demo.png)
 
-## Highlights
+## 两台机器，不是一台
 
-1. **Zero-config robot discovery** (`env.sh`) — resolves the robot IP via `$ROBOT_IP` → config file → AP default → mDNS hostname, and filters out mDNS self-hits when the PC shares the robot's hostname. Auto-picks the local `ROS_IP` on the robot's subnet, loads the ROS workspaces first so the GUI still opens when the robot is offline, and falls back to the bundled `transbot_msgs` when no catkin workspace is built.
-2. **Safety-first motion** — new velocity commands preempt old ones, 20 Hz command loop, auto-brake after 0.5–5 s idle, hard caps (0.4 m/s, 2.0 rad/s), brake-on-exit.
-3. **One GUI for everything** (`transbot_gui.py`, ~2.9k lines, tkinter, zh/en) — six tabs: base drive, RGB/buzzer effects, arm + gimbal sliders with `/CurrentAngle` readback, camera/depth viewer, mapping/navigation launcher, system status.
-4. **No catkin build required** — `vendor/python` ships the official `transbot_msgs` Python modules, so a fresh clone can drive the robot with nothing but ROS Melodic and `python3-tk`.
+这一组东西横跨两台计算机，混用是最常见的错误来源：
 
-## Quickstart
-
-```bash
-git clone https://github.com/xeyrion/transbot-remote-console.git transbot-remote-console
-cd transbot-remote-console
-
-source ./env.sh          # auto-detect robot, sets ROS_MASTER_URI / ROS_IP
-bash tasks/00-health-check.sh   # all green before continuing
-bash tasks/01-keyboard-drive.sh # i / , / j / l / k  (teleop style)
-bash run_gui.sh                 # graphical console (6 tabs)
-bash tasks/03-view-mapping.sh   # rviz mapping view (needs gmapping on robot)
-```
-
-Pin a robot IP (optional):
-
-```bash
-mkdir -p ~/.config && echo 'ROBOT_IP=<robot-ip>' > ~/.config/transbot_console.conf
-```
-
-`~/.config/transbot-console.conf` and `~/.config/transbot_demo.conf` are still
-accepted as legacy names.
-
-## Layout
-
-```
-transbot-remote-console/
-├── env.sh                # robot IP discovery + ROS_MASTER_URI / ROS_IP
-├── run_gui.sh            # GUI launcher (preflight + master probe + exec)
-├── transbot_gui.py       # tkinter console (6 tabs)
-├── check_robot.sh        # health check (voltage / scan / odom / arm / nodes)
-├── config.example.conf   # template for the pinned-IP config
-├── scripts/
-│   ├── arm_teleop.py     # keyboard teleop: arm+gimbal (left) + base (right)
-│   ├── demo_actions.py   # one-shot showroom demo, base never moves
-│   └── arm_probe.py      # arm self-test: neutral pose + per-joint probe
-├── tasks/                # one-liner entries, 00 first (see tasks/README.md)
-│   ├── 00-health-check.sh    01-keyboard-drive.sh   02-view-camera.sh
-│   ├── 03-view-mapping.sh    04-view-image.sh       05-lidar-demo.sh
-│   ├── 06-line-follow.sh     07-arm-teleop.sh       08-demo-actions.sh
-│   └── 09-gui.sh             10-mapping-ssh.sh
-├── examples/arm_min/     # /TargetAngle from `rostopic pub` to limit-checked readback
-├── maps/                 # sample map (my_map_1001.pgm/.yaml)
-├── vendor/
-│   ├── python/           # prebuilt transbot_msgs (no catkin needed)
-│   └── transbot_msgs_src/  # official msg/srv definitions
-├── rviz/camera.rviz  rviz/mapping.rviz
-├── docs/setup.md  docs/advanced.md  docs/benchmark.md
-├── docs/机械臂控制原理.md   # code-level arm walkthrough (hardware → ROS → GUI)
-└── docs/images/gui-demo.png
-```
-
-## Arm joint limits
-
-Unified across the GUI, the teleop script and `examples/arm_min`:
-
-| Joint | Servo id | Range |
+| | 控制 PC | 机器人主板 |
 |---|---|---|
-| base (j7) | 7 | 0–225° |
-| lift (j8) | 8 | 15–240° |
-| gripper (j9) | 9 | 60–180° |
+| 架构 / 系统 | x86_64，Ubuntu 18.04 | aarch64，Jetson Nano / L4T (JetPack 4.5) |
+| SSH 用户 | 你自己的账号 | `jetson` |
+| 拥有 | `console/`、`arm/` 的仿真、rviz | `/dev/ttyTHS1`、`/dev/rplidar`、`/scan`、`/odom` |
+| 能跑 | 遥控、可视化、Gazebo | 底盘驱动、雷达、建图、导航 |
 
-The vendor manual's `30–270°` for j8 is no longer used.
+凡是碰串口设备的（底盘驱动、雷达、建图、导航）**只能在主板上跑**；`console/` 只发话题和做可视化，`arm/` 的 Gazebo 场景跑在 PC 上，通过 UDP agent 与真机同步。
 
-See `docs/setup.md` for the full guide, `docs/advanced.md` for lidar / line-follow / arm / mapping notes, and `docs/benchmark.md` for measured WiFi/video numbers. For the arm internals, `docs/机械臂控制原理.md` walks a command from the GUI click down to the serial servo.
+## 从哪看起
 
-## Requirements
+- 想遥控机器人 → [`console/README.md`](console/README.md)，先跑 `bash console/tasks/00-health-check.sh`
+- 想看机械臂怎么建模、怎么和真机同步 → [`arm/README.md`](arm/README.md)
+- 想看机械臂能画多长、为什么只能画竖线 → [`wallmark/docs/07-文档总览.md`](wallmark/docs/07-文档总览.md)
+- 想理解双机架构和 ROS 数据流 → `console/docs/机械臂控制原理.md`
 
-- Ubuntu 18.04 + ROS Melodic on the control PC, robot on the same WiFi (AP or STA mode)
-- Vendor ROS packages on the ROS path: `transbot_msgs` (bundled in `vendor/`, catkin build optional), `transbot_laser` / `transbot_linefollow` (only for tasks 05/06), `teleop_twist_keyboard`, `rqt_image_view`, `rviz`
-- Python: `rospy`, `python3-tk`, `opencv-python`, `numpy`, `Pillow`, `cv_bridge` (see `requirements.txt`)
+## 共同的几何口径
 
-This repo contains original glue code (console, scripts, launchers, docs) plus the bundled `transbot_msgs` message definitions. Vendor robot firmware and driver packages are **not** included.
+机械臂的几何和限位在三个子项目里保持一致，改一处要三处同步：
+
+```text
+e1  = j7 - 95        第一节仰角；j7=95 -> 第一节水平
+rel = j8 - 180       小臂相对角；j8=180 -> 两节共线
+e2  = e1 + rel       第二节世界仰角
+L1 = 10.0 cm         j7 轴 -> j8 轴（钢卷尺实测）
+L2 = 24.0 cm         j8 轴 -> 笔尖（j9≈159 夹笔）
+j7 轴：x = 12.9 cm，离地 8.0 cm
+```
+
+限位：j7 `0–225°`、j8 `15–240°`、j9 `60–180°`。厂家 URDF 的 `L1=8.285` 和旧手册的 j8 `30–270°` 都**不再使用**。
+
+## 验证状态
+
+| 子项目 | 验证 |
+|---|---|
+| `console/` | 全部 shell `bash -n`、Python 编译检查通过（Ubuntu 18.04 / Python 3.6.9 实测） |
+| `arm/` | 18 项 unittest 全过 |
+| `wallmark/` | 55 项离线自检全过（实测角口径） |
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — 见 [`LICENSE`](LICENSE)。

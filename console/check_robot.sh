@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# transbot-remote-console / check_robot.sh
+# transbot / console / check_robot.sh
 # Health check: network + ROS topics/services/nodes.
 #
 # Usage:
