@@ -799,7 +799,7 @@ class App:
                 kind, payload = self.q.get_nowait()
                 if kind == 'status':
                     self.state = payload
-                    self.state_t = time.time()
+                    self.state_t = time.monotonic()
                     self._public_show(payload)
                 elif kind == 'raw':
                     self._log(payload)
@@ -837,7 +837,7 @@ class App:
 
     def _render(self):
         d = self.state
-        stale = (time.time() - self.state_t) > 4.0 or not d
+        stale = (time.monotonic() - self.state_t) > 4.0 or not d
 
         # 连接状态
         if stale:

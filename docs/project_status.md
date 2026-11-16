@@ -19,3 +19,10 @@
 本轮真机记录见 `results/recording_validation/README.md`；原包在 `bags/session_*_validation/`，机器人当前无活动录制，数据源仍运行。
 
 归档移动清单保存在 `archive/organization_manifest.json`。日常使用不需要进入归档目录。
+
+重启补查：机器人 RTC0/RTC1 均回到 2000 年，系统启动为 2021 年；本轮断电/重启保时验证未通过。
+已停旧厂商 ROS 栈、重新校时并启动统一外参的数据源，未发送移动指令。
+录制台空闲时没有频率是探针只读取录制健康文件造成的显示缺陷，现改为机器人本地独立异步计数；
+录制质量监测保持独立。状态探针已去掉反复执行 pgrep 的阻塞查询，GUI 状态超时改用单调时钟。
+此前 worklab_11_16 的 19 秒包已封口、回传 5 文件 SHA-256 一致；停止原因为 health_observer_failed，根因仍待定位。
+相关证据集中放在 results/recording_incident/worklab_11_16/。

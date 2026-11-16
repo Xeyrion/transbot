@@ -9,6 +9,7 @@ import gc
 from unittest.mock import patch,Mock
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'recording'))
 
 
 @unittest.skipUnless(os.environ.get('BAGTOOLS_GUI_TEST')=='1','requires isolated Xvfb display')
@@ -151,6 +152,22 @@ while True:
                          ['start', '-d', '300', '-o', '/home/jetson/bags'])
         self.assertEqual(record_gui.start_args(60, '/b', '走廊建图'),
                          ['start', '-d', '60', '-o', '/b', '-n', '走廊建图'])
+
+    def test_recorder_idle_rates_survive_wall_clock_adjustment(self):
+        import record_gui
+        with patch('record_gui.threading.Thread.start'):
+            app=record_gui.App(self.root,record_gui.Remote('jetson@192.168.1.11','unused'))
+        app.state=dict(rec=0,ros_ok=1,health_state='not_recording',rgb=30.,depth=29.,scan=7.5,
+                       master=1,driver=1,disk_free_gb=23.)
+        app.state_t=time.monotonic()
+        with patch('record_gui.time.time',return_value=0.):app._render()
+        self.assertEqual(app.v_src['rgb'].cget('text'),'30.0 Hz')
+        self.assertEqual(app.v_src['scan'].cget('text'),'7.5 Hz')
+        app.state['scan']=0.;app._render()
+        self.assertEqual(app.v_src['scan'].cget('text'),'0.0 Hz')
+        app.state_t-=5.;app._render()
+        self.assertEqual(app.v_src['rgb'].cget('text'),'--')
+        app.closing=True
 
     def test_workbench_launches_without_folder_navigation(self):
         from workbench import Workbench

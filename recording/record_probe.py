@@ -21,35 +21,65 @@
 """
 
 import glob
+import atexit
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import threading
+from stop_recording import processes
 
 TOPICS = ['/camera/rgb/image_raw', '/camera/depth/image_raw', '/scan']
 PERIOD = 1.0
 
-counts = {}
-ros_ok = False
-ros_error = ''
-
-
 # ---------------------------------------------------------------- 小工具
-def sh(cmd):
-    """跑一条 shell 命令，返回去空白后的 stdout；失败返回空串。"""
-    try:
-        out = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL,timeout=2)
-        return out.decode('utf-8', 'replace').strip()
-    except Exception:
-        return ''
+class SourceStatus:
+    """Background ROS counters; sensor startup never blocks the SSH heartbeat."""
+    def __init__(self):
+        self.proc=None;self.master=None;self.data={};self.lock=threading.Lock()
+        self.next_start=0.
+
+    def update(self, master):
+        if master!=self.master or (self.proc and self.proc.poll() is not None):
+            self.close();self.master=master
+        if master and self.proc is None and time.monotonic()>=self.next_start:
+            helper=os.path.join(os.path.dirname(os.path.abspath(__file__)),'live_health.py')
+            try:
+                proc=subprocess.Popen(['python2',helper,'full','-','--rates-only'],
+                    stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                    universal_newlines=True,bufsize=1)
+                self.proc=proc
+                threading.Thread(target=self.read,args=(proc,),daemon=True).start()
+            except OSError:
+                self.next_start=time.monotonic()+3.
+
+    def read(self,proc):
+        try:
+            for line in proc.stdout:
+                try:data=json.loads(line)
+                except ValueError:continue
+                with self.lock:
+                    if self.proc is proc:self.data=data
+        finally:
+            proc.stdout.close();proc.wait()
+
+    def snapshot(self):
+        with self.lock:return dict(self.data)
+
+    def close(self):
+        proc=self.proc;self.proc=None
+        with self.lock:self.data={}
+        if proc and proc.poll() is None:proc.terminate()
 
 
 def read_file(path, limit=4096):
     try:
         with open(path, 'rb') as f:
-            data = f.read()
+            f.seek(0,os.SEEK_END)
+            f.seek(max(0,f.tell()-limit))
+            data = f.read(limit)
         return data[-limit:].decode('utf-8', 'replace').strip()
     except Exception:
         return ''
@@ -64,34 +94,26 @@ def disk_free_gb(path=None):
         return -1.0
 
 
-def bag_state():
+def file_size(path):
+    try:return os.path.getsize(path)
+    except OSError:return 0
+
+
+def bag_state(procs=None):
     """找到正在录的 rosbag，返回 (路径前缀, 文件列表, 已录秒数)。
 
     rosbag record 的命令行长这样：
         python2 .../rosbag record -O /home/jetson/bags/cam_20261110_022211.bag --lz4 ...
     正在写的文件叫 cam_20261110_022211_0.bag.active，收尾后改名去掉 .active。
     """
-    pids = sh('pgrep -f "bin/rosbag record"').split()
-    if not pids:
-        return '', [], 0.0, 0
-
-    # 以前拿到第一个 -O 就 break，双录制时第二个会话完全看不见，
-    # 所以“已经在录两份”这件事只能等盘满了才发现。这里全部收集。
-    prefixes = []
-    for pid in pids:
-        try:
-            with open('/proc/%s/cmdline' % pid, 'rb') as f:
-                argv = f.read().split(b'\0')
-        except Exception:
-            continue
-        argv = [a.decode('utf-8', 'replace') for a in argv if a]
-        for i, a in enumerate(argv):
-            if a == '-O' and i + 1 < len(argv):
-                prefixes.append(argv[i + 1])
-                break
-
-    if not prefixes:
-        return '', [], 0.0, 0
+    prefixes=[]
+    for argv in (processes() if procs is None else procs).values():
+        scripts={os.path.basename(a) for a in argv[:2]}
+        recorder=bool(argv) and (argv[0].endswith('/rosbag/record') or ('rosbag' in scripts and 'record' in argv))
+        if recorder and '-O' in argv:
+            index=argv.index('-O')
+            if index+1<len(argv) and argv[index+1] not in prefixes:prefixes.append(argv[index+1])
+    if not prefixes:return '',[],0.,0
     prefix = prefixes[0]
 
     base = prefix[:-4] if prefix.endswith('.bag') else prefix
@@ -117,49 +139,48 @@ def bag_state():
     return prefix, files, elapsed, len(prefixes)
 
 
-def topic_rates(prev, dt):
-    """用两次采样之间的计数差算频率。"""
-    out = {}
-    if not ros_ok or dt <= 0:
-        return {t: -1.0 for t in TOPICS}
-    for t in TOPICS:
-        out[t] = round(max(0,counts.get(t, 0) - prev.get(t, 0)) / dt, 1)
-    return out
+def topic_rates(snapshot, now):
+    if not (0<=now-snapshot.get('updated_monotonic',0)<3.):
+        return {t:-1. for t in TOPICS}
+    result={}
+    for topic in TOPICS:
+        item=snapshot.get('streams',{}).get(topic,{})
+        if now-item.get('last_monotonic',0)>3.:
+            result[topic]=0.
+        else:
+            result[topic]=snapshot.get('rates',{}).get(topic,-1.)
+    return result
 
 
 # ---------------------------------------------------------------- 主循环
 def main():
-    global counts,ros_ok,ros_error
-
-    prev_counts = {}
-    prev_t = time.monotonic()
     prev_bytes = 0
     prev_bytes_t = time.monotonic()
     prev_prefix=None
-    no_bag_ticks = 0
+    source=SourceStatus()
+    atexit.register(source.close)
 
     while True:
-        now = time.monotonic()
-        dt = now - prev_t
-        prefix, files, elapsed, sessions = bag_state()
+        procs=processes()
+        master=tuple(sorted(pid for pid,args in procs.items() if any(os.path.basename(a)=='rosmaster' for a in args[:2])))
+        source.update(master)
+        prefix, files, elapsed, sessions = bag_state(procs)
+        now=time.monotonic()
         health={}
         if prefix:
             stem=prefix[:-4] if prefix.endswith('.bag') else prefix
             try:
                 with open(stem+'.health.json') as f: health=json.load(f)
             except (OSError,ValueError): pass
-        fresh=-.2<=now-health.get('updated_monotonic',0)<3
-        counts={t:v['count'] for t,v in health.get('streams',{}).items()} if fresh else {}
-        ros_ok=fresh and health.get('state')=='healthy'
-        ros_error=','.join(health.get('faults',[])) or ('observer unavailable' if not fresh else '')
-        if prefix!=prev_prefix: prev_counts=dict(counts); prev_bytes=0; prev_prefix=prefix
-        if health.get('started_monotonic') is not None: elapsed=max(0,now-health['started_monotonic'])
+        snapshot=source.snapshot()
+        now=time.monotonic()
+        fresh=0<=now-snapshot.get('updated_monotonic',0)<3.
+        ros_ok=fresh
+        ros_error='' if fresh else ('source observer starting' if master else 'ROS master unavailable')
+        if prefix!=prev_prefix:prev_bytes=0;prev_prefix=prefix
+        rates=topic_rates(snapshot,now)
 
-        rates = topic_rates(prev_counts, dt)
-        prev_counts = dict(counts)
-        prev_t = now
-
-        total = sum(os.path.getsize(p) for p in files if os.path.exists(p)) if files else 0
+        total = sum(file_size(p) for p in files)
 
         # 写盘速率：只在同一个 bag 内算，换文件就重新开始
         if total and prev_bytes and total >= prev_bytes:
@@ -168,11 +189,6 @@ def main():
         else:
             mbps = 0.0
         prev_bytes, prev_bytes_t = total, now
-
-        if files:
-            no_bag_ticks = 0
-        else:
-            no_bag_ticks += 1
 
         log_tail = read_file('/tmp/record_full_console.log', 600).splitlines()
         log_last = log_tail[-1].strip() if log_tail else ''
@@ -192,15 +208,16 @@ def main():
             'rgb': rates.get('/camera/rgb/image_raw', -1.0),
             'depth': rates.get('/camera/depth/image_raw', -1.0),
             'scan': rates.get('/scan', -1.0),
-            'driver': 1 if sh('pgrep -f "transbot_driver.py"') else 0,
-            'master': 1 if sh('pgrep -f "bin/rosmaster"') else 0,
+            'driver': int(any(any(os.path.basename(a)=='transbot_driver.py' for a in args[:2]) for args in procs.values())),
+            'master': int(bool(master)),
+            'sensor_state': 'live' if fresh else 'starting' if master else 'unavailable',
             'ros_ok': 1 if ros_ok else 0,
             'ros_error': ros_error,
             'log': log_last[:160],
         }
         sys.stdout.write(json.dumps(rec, ensure_ascii=False) + '\n')
         sys.stdout.flush()
-        time.sleep(PERIOD)
+        time.sleep(max(.05,PERIOD-(time.monotonic()-now)))
 
 
 if __name__ == '__main__':

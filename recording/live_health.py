@@ -7,6 +7,7 @@ import ctypes
 import json
 import os
 import struct
+import sys
 import threading
 import time
 from stream_health import StreamHealth, LATCHED, ODOM_TF
@@ -21,9 +22,34 @@ def monotonic():
     return value.sec+value.nsec/1e9
 
 
+def rates_main():
+    """Read-only local counters for the GUI, independent of bag recording."""
+    import rospy
+    from rospy.msg import AnyMsg
+    rospy.init_node('bagtools_source_status',anonymous=True,disable_signals=True)
+    topics=['/camera/rgb/image_raw','/camera/depth/image_raw','/scan']
+    streams={};lock=threading.Lock();previous={};sample_time=monotonic()
+    def observe(msg,topic):
+        with lock:
+            old=streams.get(topic,{})
+            streams[topic]=dict(count=old.get('count',0)+1,last_monotonic=monotonic())
+    subscribers=[rospy.Subscriber(t,AnyMsg,observe,callback_args=t,queue_size=1,buff_size=2**22) for t in topics]
+    while not rospy.is_shutdown():
+        with lock:
+            snapshot=dict(updated_monotonic=monotonic(),streams={t:dict(v) for t,v in streams.items()})
+        now=snapshot['updated_monotonic'];dt=now-sample_time
+        snapshot['rates']={t:round(max(0,snapshot['streams'].get(t,{}).get('count',0)-previous.get(t,0))/dt,1) if dt>=.1 else -1. for t in topics}
+        previous={t:v['count'] for t,v in snapshot['streams'].items()};sample_time=now
+        sys.stdout.write(json.dumps(snapshot)+'\n');sys.stdout.flush();time.sleep(1.)
+    return 0
+
+
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('profile',choices=['full','nav']); ap.add_argument('output')
-    ap.add_argument('--timeout',type=float,default=3.); args=ap.parse_args()
+    ap.add_argument('--timeout',type=float,default=3.)
+    ap.add_argument('--rates-only',action='store_true'); args=ap.parse_args()
+    if args.rates_only:
+        return rates_main()
     health=StreamHealth(args.profile,monotonic(),timeout=args.timeout); lock=threading.Lock()
     def save(snapshot):
         snapshot['observer_pid']=os.getpid()
