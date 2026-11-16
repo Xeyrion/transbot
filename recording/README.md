@@ -13,3 +13,6 @@ record_full.sh 管理录前检查与单实例，auto_record_cam.sh 管理 record
 正式离线算法和标定工具位于 ../semantic/。旧标定、投影和截图辅助脚本已移至项目 archive/legacy_tools/，不作为运行入口。
 
 使用流程见 ../docs/workflow.md，标定说明见 ../docs/calibration.md。
+
+相机安装参数统一读取本目录 `calibration.json`，与 `record_sources.launch` 一起部署并参与版本校验。
+录前检查实际 TF 数值及唯一发布源，每次完整录制自动保存配置副本；旧的厂商录制 launch 不再作为配置生效的依据。

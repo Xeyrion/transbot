@@ -30,7 +30,7 @@ echo "--- 现状 ---"
 "${SSH[@]}" "cd $DEST && ls -l record_full.sh auto_record_cam.sh restart_camera.sh 2>&1 | head -4"
 
 echo "--- 备份 ---"
-"${SSH[@]}" "cd $DEST && mkdir -p bagtools_archive/deployments/$STAMP && for f in record_full.sh auto_record_cam.sh restart_camera.sh preflight.sh stop_recording.py session_status.py session_finalize.py record_quality.py record_guard.py publish_calibration.py live_health.py stream_health.py record_probe.py calibration_schema.py recorder_bundle.py remote_start.py check_tf.py clock_check.py; do
+"${SSH[@]}" "cd $DEST && mkdir -p bagtools_archive/deployments/$STAMP && for f in record_full.sh auto_record_cam.sh restart_camera.sh preflight.sh stop_recording.py session_status.py session_finalize.py record_quality.py record_guard.py publish_calibration.py live_health.py stream_health.py record_probe.py calibration_schema.py recorder_bundle.py remote_start.py check_tf.py clock_check.py record_sources.launch calibration.json; do
   [ -f \$f ] && cp -p \$f bagtools_archive/deployments/$STAMP/ && echo \"  archived \$f\"
 done; true"
 
@@ -39,7 +39,7 @@ echo "--- 上传 ---"
   "$HERE/restart_camera.sh" "$HERE/preflight.sh" "$HERE/stop_recording.py" "$HERE/session_status.py" \
   "$HERE/session_finalize.py" "$HERE/record_quality.py" "$HERE/record_guard.py" \
   "$HERE/publish_calibration.py" "$HERE/live_health.py" "$HERE/stream_health.py" "$HERE/record_probe.py" \
-  "$HERE/../calibration_schema.py" "$HERE/recorder_bundle.py" "$HERE/remote_start.py" "$HERE/check_tf.py" "$HERE/clock_check.py" "$ROBOT:$DEST/"
+  "$HERE/../calibration_schema.py" "$HERE/recorder_bundle.py" "$HERE/remote_start.py" "$HERE/check_tf.py" "$HERE/clock_check.py" "$HERE/record_sources.launch" "$HERE/calibration.json" "$ROBOT:$DEST/"
 
 echo "--- 校验 ---"
 "${SSH[@]}" "cd $DEST && chmod +x record_full.sh auto_record_cam.sh restart_camera.sh preflight.sh \

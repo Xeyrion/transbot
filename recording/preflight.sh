@@ -10,6 +10,9 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -z "${BAGTOOLS_CALIBRATION:-}" ] && [ -f "$HERE/calibration.json" ]; then
+  export BAGTOOLS_CALIBRATION="$HERE/calibration.json"
+fi
 FIX=0
 [ "${1:-}" = "--fix" ] && FIX=1
 
@@ -37,6 +40,10 @@ has_data() {  # 6 秒内真收到一条消息，不是只看话题在不在
 
 tf_ok() {
   timeout -k 1 5 python2 "$HERE/check_tf.py" "$1" "$2" >/dev/null 2>&1
+}
+
+calibration_ok() {
+  timeout -k 1 7 python2 "$HERE/check_tf.py" --calibration "$BAGTOOLS_CALIBRATION"
 }
 
 frame_of() {
@@ -74,6 +81,13 @@ check_all() {
     set -- $pair
     if tf_ok "$1" "$2"; then report ok "TF $1→$2"; else report fail "TF $1→$2 缺"; fi
   done
+  if [ -n "${BAGTOOLS_CALIBRATION:-}" ]; then
+    if calibration_ok; then
+      report ok "Installation TF matches calibration; one publisher per configured edge"
+    else
+      report fail "Installation TF differs from calibration or has conflicting publishers"
+    fi
+  fi
   for t in /camera/rgb/image_raw /camera/depth/image_raw; do
     frame=$(frame_of "$t")
     if [ -n "$frame" ] && tf_ok base_link "$frame"; then
@@ -93,14 +107,29 @@ check_all() {
 fix_all() {
   echo "== 自动修复 =="
   # 底盘/雷达没数据：起我们自己的 launch（它同时带 depth_align 和相机 TF）
-  if ! has_data /scan || ! has_data /odom; then
-    echo "  重启数据源：transbot_record.launch"
-    for p in $(pgrep -f 'bin/roslaunch transbot_nav transbot_recor[d].launch' 2>/dev/null); do
+  local restart=0 camera_args=''
+  if ! has_data /scan || ! has_data /odom; then restart=1; fi
+  if [ -n "${BAGTOOLS_CALIBRATION:-}" ]; then
+    camera_args=$(python3 "$HERE/publish_calibration.py" --camera-args "$BAGTOOLS_CALIBRATION") || return 1
+    calibration_ok || restart=1
+  fi
+  if [ "$restart" -eq 1 ]; then
+    echo '  Restart recording sources with installation calibration'
+    for p in $(pgrep -f 'bin/roslaunch (transbot_nav transbot_recor[d].launch|[^ ]*/record_source[s].launch)' 2>/dev/null); do
       kill -TERM "$p" 2>/dev/null
     done
-    sleep 2
-    setsid nohup roslaunch transbot_nav transbot_record.launch \
-      > /tmp/transbot_record.log 2>&1 < /dev/null &
+    sleep 4
+    if [ -n "${BAGTOOLS_CALIBRATION:-}" ]; then
+      if tf_ok base_link camera_link; then
+        echo 'Another camera TF publisher is still running; stop its launch before applying calibration' >&2
+        return 1
+      fi
+      setsid nohup roslaunch "$HERE/record_sources.launch" "camera_transform:=$camera_args" \
+        > /tmp/transbot_record.log 2>&1 < /dev/null &
+    else
+      setsid nohup roslaunch transbot_nav transbot_record.launch \
+        > /tmp/transbot_record.log 2>&1 < /dev/null &
+    fi
     for _ in $(seq 1 60); do
       sleep 1
       has_data /scan && has_data /odom && break
@@ -111,14 +140,10 @@ fix_all() {
     echo "  重启相机：astrapro.launch（depth_align:=true）"
     bash "$HERE/restart_camera.sh" || true
   fi
-  # 相机到底盘的静态变换只有 transbot_record.launch 会给，缺了就补一条
+  # Camera installation TF belongs to the source launch, never a second publisher.
   if ! tf_ok base_link camera_link; then
-    if [ -n "${BAGTOOLS_CALIBRATION:-}" ]; then
-      python3 "$HERE/publish_calibration.py" "$BAGTOOLS_CALIBRATION" base_link camera_link || return 1
-      sleep 2
-    else
-      echo 'Missing installation TF: provide BAGTOOLS_CALIBRATION; default dimensions are not calibration' >&2
-    fi
+    echo 'Missing installation TF: check the recording source launch and calibration.json' >&2
+    return 1
   fi
 }
 
@@ -126,7 +151,7 @@ echo '== 录前时钟检查（只读，不在运行中的 EKF 上跳时）=='
 python3 "$HERE/clock_check.py" || exit 1
 check_all
 if [ "$FAILED" -gt 0 ] && [ "$FIX" -eq 1 ]; then
-  fix_all
+  fix_all || exit 1
   check_all
 fi
 

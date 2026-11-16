@@ -8,6 +8,19 @@ import numbers
 ALLOWED_EDGES={('base_footprint','base_link'),('base_link','camera_link'),('base_link','laser')}
 
 
+def transform_error(xyz, quaternion, expected):
+    """Translation metres and quaternion sign-independent rotation radians."""
+    values = list(xyz) + list(quaternion)
+    if not all(isinstance(v,numbers.Real) and not isinstance(v,bool) and not math.isnan(v) and not math.isinf(v) for v in values):
+        raise ValueError('Invalid live transform')
+    norm = math.sqrt(sum(v*v for v in quaternion))
+    if abs(norm-1.) > 1e-4:
+        raise ValueError('Live transform quaternion is not normalized')
+    distance = math.sqrt(sum((a-b)**2 for a,b in zip(xyz,expected['xyz'])))
+    dot = abs(sum(a*b for a,b in zip(quaternion,expected['quaternion_xyzw']))/norm)
+    return distance, 2.*math.acos(min(1.,dot))
+
+
 def load_calibration(path):
     with io.open(path,encoding='utf-8') as f: data=json.load(f)
     try: strings=(basestring,)

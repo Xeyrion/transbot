@@ -29,6 +29,9 @@ ALLOW_MISSING=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RECORDER="$SCRIPT_DIR/auto_record_cam.sh"
+if [ -z "${BAGTOOLS_CALIBRATION:-}" ] && [ -f "$SCRIPT_DIR/calibration.json" ]; then
+  export BAGTOOLS_CALIBRATION="$SCRIPT_DIR/calibration.json"
+fi
 
 usage() {
   # 同 remote_record.sh：按注释块截取，不写死行号
@@ -228,4 +231,4 @@ fi
 
 echo
 echo "提示：数据源仍在后台运行。要停掉："
-echo "  pkill -f 'transbot_nav transbot_record.launch'"
+echo "  pkill -f '[r]oslaunch.*(transbot_record|record_sources).launch'"

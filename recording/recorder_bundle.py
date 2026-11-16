@@ -7,7 +7,8 @@ from pathlib import Path
 
 NAMES=['record_full.sh','auto_record_cam.sh','restart_camera.sh','preflight.sh','stop_recording.py',
        'session_status.py','session_finalize.py','record_quality.py','record_guard.py','publish_calibration.py',
-       'live_health.py','stream_health.py','record_probe.py','calibration_schema.py','recorder_bundle.py','remote_start.py','check_tf.py','clock_check.py']
+       'live_health.py','stream_health.py','record_probe.py','calibration_schema.py','recorder_bundle.py','remote_start.py','check_tf.py','clock_check.py',
+       'record_sources.launch','calibration.json']
 
 
 def bundle():

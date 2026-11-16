@@ -30,6 +30,13 @@ def commands(path):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--camera-args':
+        data, cmds = commands(sys.argv[2])
+        camera = [cmd for cmd in cmds if cmd[-2:] == ['base_link', 'camera_link']]
+        if len(camera) != 1:
+            raise ValueError('Calibration must contain base_link -> camera_link')
+        print(' '.join(camera[0][3:]))
+        sys.exit(0)
     data, cmds = commands(sys.argv[1])
     if len(sys.argv) == 4:
         cmds = [cmd for cmd in cmds if cmd[-2:] == sys.argv[2:4]]

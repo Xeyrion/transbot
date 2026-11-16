@@ -11,4 +11,4 @@
 
 下一轮采集先录短的静止/移动试验，正常停止并核对时间、TF、雷达和 RGB-D；通过后再录正式会话。录制前核对系统时间，录制过程中不要手动跳时。数据质量与地图覆盖看实际结果，不以旧底图或仅有 complete 标志代替检查。
 
-相机仍是同一台车、支架未变化。优先找回已有标定并复核缺失参数，详见 [calibration.md](calibration.md)。裂缝图片准备和标注见 [LABELING.md](../semantic/LABELING.md)。
+相机仍是同一台车、支架未变化。本轮墙面与板材候选经独立位置检查，统一配置在 `recording/calibration.json`；录前核对实际 TF，录制会话保存配置副本，详见 [calibration.md](calibration.md)。裂缝图片准备和标注见 [LABELING.md](../semantic/LABELING.md)。

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "wallboard_20261116_multi_pose_trial",
+  "estimated": true,
+  "transforms": [
+    {
+      "parent": "base_link",
+      "child": "camera_link",
+      "xyz": [
+        0.10736045779249229,
+        -0.05646858368487983,
+        0.10537013977033889
+      ],
+      "quaternion_xyzw": [
+        0.002099624259168637,
+        -0.06379990185287765,
+        0.009463502689008432,
+        0.9979156308117378
+      ]
+    }
+  ],
+  "source_candidate_sha256": "101effbc5d137cd81a92849f72558ba02c41a2b6db6ee4c3d63f5baedacaff65",
+  "validation": "Independent translation and rotation checks; wall/right board P95 9.9-15.1 mm; approximate height, not metrology truth",
+  "robot": "transbot jetson@192.168.1.11; same unchanged camera installation",
+  "evidence": "results/calibration_review/validation_summary.json"
+}

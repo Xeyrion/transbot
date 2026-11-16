@@ -1,0 +1,12 @@
+<launch>
+    <!-- The camera installation has one publisher, configured by calibration.json. -->
+    <arg name="camera_transform"/>
+    <include file="$(find transbot_bringup)/launch/bringup.launch"/>
+    <include file="$(find astra_camera)/launch/astrapro.launch">
+        <arg name="enable_point_cloud" value="false"/>
+        <arg name="depth_align" value="true"/>
+    </include>
+    <include file="$(find transbot_nav)/launch/library/rplidar.launch"/>
+    <node pkg="tf2_ros" type="static_transform_publisher"
+          name="bagtools_camera_extrinsic" args="$(arg camera_transform)"/>
+</launch>

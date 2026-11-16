@@ -13,6 +13,9 @@
 - 已修复录前时钟检查、关键 TF 时钟漏检、Header 冻结/正跳漏检、脚本换行兼容，以及录前启动后台传感器继承录制锁的问题。原始传感器消息不改写。
 - 机器人本轮发现系统时间为 2021 年、RTC 为 2000 年。停止 ROS 后已校时、写回 RTC 并改为 UTC，Chrony 运行期 makestep 已关闭并留存原配置；公网 NTP 仍未同步。断电保时和移动建图精度尚未验证。
 
+- 相机外参统一配置已接入 `recording/calibration.json` 和单一发布源启动文件；本轮 6 秒静止包完成、回传 5 文件 SHA-256 一致。包内相机 TF 与配置一致、唯一来源正确，时间审核无回退或序号缺口，RGB-D P95 7.64 ms。记录见 `results/calibration_review/application/`；仍为估计外参，移动场景精度待检。
+- 外参接入新增 3 项单元检查和 5 个隔离 ROS 情形验证。旧 `structure_lab_11_11` 的时间修复、跨异常前后段完整重建仍待完成。
+
 本轮真机记录见 `results/recording_validation/README.md`；原包在 `bags/session_*_validation/`，机器人当前无活动录制，数据源仍运行。
 
 归档移动清单保存在 `archive/organization_manifest.json`。日常使用不需要进入归档目录。
