@@ -1,6 +1,17 @@
 bags/
 models/
 results/
+archive/
+.bagtools_maps/
+.mapping_work/
+maps/
 __pycache__/
 *.pyc
 *.pt
+*.bag
+*.bag.active
+*.log
+*.part
+*.pgm
+*.bak
+.pytest_cache/

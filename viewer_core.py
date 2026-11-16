@@ -82,15 +82,20 @@ def session_files(path):
     return files or ([path] if os.path.isfile(path) else [])
 
 
-def association(path, manifest=None):
-    """地图栅格：→ {yaml, trajectory, sources, source}，没有就 None。
+def map_directory(path):
+    files=session_files(path)
+    if not files:raise ValueError('No source bags')
+    stem=os.path.splitext(os.path.basename(files[0]))[0]
+    if re.match(r'^.*_\d{8}_\d{6}_\d+$',stem):stem=re.sub(r'_\d+$','',stem)
+    return os.path.join(os.path.dirname(files[0]),'maps',stem)
 
-    两种来源：
-      1. `<分卷>.map.json` —— 离线重建（rebuild_map）的产物，带来源校验，
-         附带一个只装 TF 的轨迹包，读它比解压源包快得多；
-      2. 同目录下的 `map_*.yaml` —— record_full.sh 在录制结束时存下的最终栅格。
-         这种没有轨迹包（轨迹本来就在源包里），trajectory 返回 None。
-    """
+
+def map_manifest_path(path):
+    return os.path.join(map_directory(path),'association.json')
+
+
+def association(path, manifest=None):
+    """Use the current map bundle only; archived maps and loose rasters are not fallbacks."""
     path=filesystem_text(path)
     manifest=filesystem_text(manifest) if manifest else None
     files = session_files(path)
@@ -98,7 +103,7 @@ def association(path, manifest=None):
         return None
     if manifest and not os.path.isfile(manifest):
         raise ValueError('Missing map association: '+manifest)
-    candidates = [manifest] if manifest else [path+'.map.json', files[0]+'.map.json']
+    candidates = [manifest] if manifest else [map_manifest_path(files[0])]
     for candidate in candidates:
         if not os.path.isfile(candidate):
             continue
@@ -118,16 +123,6 @@ def association(path, manifest=None):
         data['trajectory'] = os.path.abspath(os.path.join(root, data['trajectory'])) if data.get('trajectory') else None
         data['source'] = 'rebuild'
         return data
-    # 录制时就存下来的栅格。同一个会话目录里有多张就取最新那张（文件名带时间戳）。
-    rasters = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(path)),
-                                            'map_*.yaml')))
-    if rasters:
-        raw=[p for p in glob.glob(os.path.join(os.path.dirname(files[0]),'*.bag')) if not p.endswith('.mapping.bag')]
-        groups=set(re.sub(r'_\d+\.bag$','',p) if re.search(r'_\d{8}_\d{6}_\d+\.bag$',p) else p for p in raw)
-        if len(groups)>1:
-            raise ValueError('Raster map is ambiguous across sessions; provide an explicit association')
-        return dict(yaml=os.path.abspath(rasters[-1]), trajectory=None,
-                    sources=[], source='raster')
     return None
 
 

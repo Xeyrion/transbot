@@ -18,6 +18,7 @@ class GuiTests(unittest.TestCase):
         import bag_quality_gui as gui
         self.gui=gui;self.root=tk.Tk()
         self.tmp=tempfile.TemporaryDirectory();self.folder=Path(self.tmp.name)
+        self.archive_env=patch.dict(os.environ,{'BAGTOOLS_ARCHIVE_DIR':str(self.folder/'archive')});self.archive_env.start()
         self.old_server=gui.SERVER;self.old_probe=gui.PROBE
 
     def tearDown(self):
@@ -27,6 +28,7 @@ class GuiTests(unittest.TestCase):
         self.root=None
         gc.collect()  # Dispose Tcl interpreters on the UI thread, before another test starts workers.
         self.tmp.cleanup()
+        self.archive_env.stop()
 
     def pump(self, predicate, seconds=5):
         end=time.monotonic()+seconds
@@ -102,7 +104,8 @@ while True:
 
     def test_mapping_decline_keeps_folder_unchanged(self):
         session=self.folder/'session_test';session.mkdir();(session/'cam_20261115_120000_0.bag').write_bytes(b'bag')
-        (session/'map_old.yaml').write_text('old map')
+        from viewer_core import map_manifest_path
+        pointer=Path(map_manifest_path(str(session/'cam_20261115_120000_0.bag')));pointer.parent.mkdir(parents=True);pointer.write_text('{}')
         app=self.gui.App(self.root,str(self.folder));self.root.update()
         app.catalog.selection_set(app.catalog.get_children()[0])
         with patch.object(self.gui.messagebox,'askyesno',return_value=False) as ask, \

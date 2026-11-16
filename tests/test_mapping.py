@@ -4,10 +4,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from mapping_job import recording_groups,new_job,map_artifacts,publish,source_snapshot,MappingJob
-from viewer_core import association,mapped_window
+from viewer_core import association,mapped_window,map_manifest_path
 
 
 def result_fixture(job):
@@ -24,11 +25,12 @@ def result_fixture(job):
 class MappingTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.archive=self.root/'archive';self.env=patch.dict(os.environ,{'BAGTOOLS_ARCHIVE_DIR':str(self.archive)});self.env.start()
         self.first=self.root/'cam_20261115_120000_0.bag';self.first.write_bytes(b'original')
         self.second=self.root/'cam_20261115_120000_1.bag';self.second.write_bytes(b'original2')
-        self.files=[str(self.first),str(self.second)];self.pointer=Path(str(self.first)+'.map.json')
+        self.files=[str(self.first),str(self.second)];self.pointer=Path(map_manifest_path(str(self.first)));self.pointer.parent.mkdir(parents=True)
 
-    def tearDown(self):self.tmp.cleanup()
+    def tearDown(self):self.env.stop();self.tmp.cleanup()
 
     def test_groups_exclude_derived_and_keep_numeric_order(self):
         (self.root/'cam_20261115_120000_10.bag').write_bytes(b'x')
@@ -43,6 +45,7 @@ class MappingTests(unittest.TestCase):
         (self.root/'test.bag.active').touch()
         with self.assertRaises(ValueError):new_job(str(self.first))
         self.assertFalse((self.root/'.bagtools_maps').exists())
+        self.assertFalse(self.archive.exists())
 
     def test_success_switches_map_and_retains_previous_pointer(self):
         previous=b'{"old":true}';self.pointer.write_bytes(previous)
@@ -53,6 +56,8 @@ class MappingTests(unittest.TestCase):
         self.assertTrue(linked['replace_map_odom'])
         self.assertEqual(linked['record_bounds'],[10.,20.])
         self.assertTrue(Path(linked['trajectory']).is_file())
+        self.assertEqual(Path(linked['trajectory']).parent,self.pointer.parent)
+        self.assertTrue(list((self.archive/'maps').rglob('association.json')))
         self.assertEqual(self.first.read_bytes(),b'original')
 
     def test_failed_outputs_never_replace_active_map(self):
@@ -77,7 +82,7 @@ class MappingTests(unittest.TestCase):
 
     @unittest.skipIf(os.name=='nt','ROS mapping worker runs on Linux')
     def test_existing_map_requires_confirmation_in_worker(self):
-        (self.root/'map_saved.yaml').write_text('image: old.pgm')
+        self.pointer.write_bytes(b'current map')
         self.assertTrue(map_artifacts(str(self.first)))
         job=new_job(str(self.first))
         with self.assertRaises(ValueError):MappingJob(str(self.first),str(job),False).run()

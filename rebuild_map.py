@@ -133,13 +133,8 @@ def main():
                ROS_IP='127.0.0.1')
     env.pop('ROS_HOSTNAME', None)
     facts = probe_bags(sources, env)
-    if facts['map'] and facts['map_odom']:
-        # 地图本来就在包里，抄出来就行 —— 重跑 gmapping 只会和 map->odom 打架
-        subprocess.run(['python2', os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                'extract_map.py')] + sources, env=env, check=True)
-        return
-    if facts['map_odom']:
-        skip('包里已有 map->odom，但没有 /map 可以导出；重建会和已有变换冲突')
+    if facts['map'] or facts['map_odom']:
+        skip('Use the workbench or rebuild_map.sh to recompute a current map; recorded maps are not reused')
     if not facts['scan']:
         skip('包里没有 /scan，建不了图')
     stem = sources[0]+'.mapping'

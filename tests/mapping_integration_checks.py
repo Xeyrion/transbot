@@ -11,6 +11,7 @@ import time
 
 root=Path(sys.argv[1]).resolve();sys.path.insert(0,str(root))
 from mapping_job import new_job,read_status
+from viewer_core import map_manifest_path
 
 fixture='''import rosbag,rospy,math,sys
 from geometry_msgs.msg import TransformStamped
@@ -67,10 +68,12 @@ def read_frame(bag):
 
 with tempfile.TemporaryDirectory(prefix='mapping-ros-integration-') as temp:
     folder=Path(temp);bag=folder/'cam_20261115_120000_0.bag'
+    os.environ['BAGTOOLS_ARCHIVE_DIR']=str(folder/'archive')
     generator=folder/'fixture.py';generator.write_text(fixture)
     subprocess.run(['python2',str(generator),str(bag)],check=True)
     original=hashlib.sha256(bag.read_bytes()).hexdigest()
-    pointer=Path(str(bag)+'.map.json');old=b'{"legacy_static_map":true}';pointer.write_bytes(old)
+    pointer=Path(map_manifest_path(str(bag)));pointer.parent.mkdir(parents=True)
+    old=b'{"legacy_static_map":true}';pointer.write_bytes(old)
     job=new_job(str(bag));code,status=wait_worker(spawn(bag,job),job)
     assert code==0 and status['state']=='complete',status
     assert (job/'previous_association.json').read_bytes()==old
@@ -99,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='mapping-ros-integration-') as temp:
     # An invalid navigation bag must fail without touching an existing pointer.
     invalid=folder/'invalid';invalid.mkdir();bad=invalid/'cam_20261115_130000_0.bag'
     subprocess.run(['python2','-c',"import rosbag,sys; rosbag.Bag(sys.argv[1],'w').close()",str(bad)],check=True)
-    bad_pointer=Path(str(bad)+'.map.json');bad_pointer.write_bytes(old)
+    bad_pointer=Path(map_manifest_path(str(bad)));bad_pointer.parent.mkdir(parents=True);bad_pointer.write_bytes(old)
     failed=new_job(str(bad));code,status=wait_worker(spawn(bad,failed),failed)
     assert status['state']=='failed' and bad_pointer.read_bytes()==old,status
     assert hashlib.sha256(bag.read_bytes()).hexdigest()==original

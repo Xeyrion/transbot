@@ -59,7 +59,7 @@ def load_tf(files, log, bounds=(None, None), allow_estimated=False, calibration=
     trajectory = linked.get('trajectory') if linked else None
     for path in files + ([trajectory] if trajectory else []):
         with rosbag.Bag(path) as bag:
-            absorb(tf, bag, bounds, skip_map_odom=bool(linked and linked.get('replace_map_odom') and path in files),
+            absorb(tf, bag, bounds, skip_map_odom=bool(path in files and (not linked or linked.get('replace_map_odom'))),
                    skip_edges=[tuple(k) for k in linked.get('replace_installation_edges',[])] if linked and path in files else ())
     tf.calibration_id = None
     tf.calibration_estimated = False

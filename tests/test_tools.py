@@ -11,7 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from viewer_core import TransformIndex, transform_xy, association, world_to_view, session_files
+from viewer_core import TransformIndex, transform_xy, association, world_to_view, session_files,map_manifest_path
 sys.path.insert(0, str(ROOT/'recording'))
 from session_status import snapshot
 from session_catalog import sessions, session_label, session_dir_name, rename_target
@@ -37,17 +37,14 @@ class Python2SourceTests(unittest.TestCase):
 
 
 class MapAssociationTests(unittest.TestCase):
-    def test_falls_back_to_raster_saved_with_the_session(self):
-        # 录制收尾时 record_full.sh 存的 map_*.yaml：没有 .map.json，也没有轨迹包
+    def test_loose_legacy_rasters_are_not_used(self):
         with tempfile.TemporaryDirectory() as d:
             bag = Path(d)/'cam_20261112_011503_0.bag'
             bag.write_bytes(b'x')
             (Path(d)/'map_20261112_011503.yaml').write_text(
                 'image: map_20261112_011503.pgm\nresolution: 0.05\norigin: [0, 0, 0]\n')
-            got = association(str(bag))
-            self.assertEqual(got['source'], 'raster')
-            self.assertTrue(got['yaml'].endswith('map_20261112_011503.yaml'))
-            self.assertIsNone(got['trajectory'])
+            (Path(d)/'cam_20261112_011503_0.bag.map.json').write_text('{}')
+            self.assertIsNone(association(str(bag)))
 
     def test_rebuilt_map_wins_over_raster(self):
         with tempfile.TemporaryDirectory() as d:
@@ -57,7 +54,8 @@ class MapAssociationTests(unittest.TestCase):
             (Path(d)/'cam_20261112_011503_0.bag.mapping.yaml').write_text('image: x.pgm\n')
             (Path(d)/'cam_20261112_011503_0.bag.mapping.bag').write_bytes(b'tf')
             st = bag.stat()
-            (Path(d)/'cam_20261112_011503_0.bag.map.json').write_text(json.dumps(dict(
+            current=Path(map_manifest_path(str(bag)));current.parent.mkdir(parents=True)
+            current.write_text(json.dumps(dict(
                 yaml='cam_20261112_011503_0.bag.mapping.yaml',
                 trajectory='cam_20261112_011503_0.bag.mapping.bag',
                 sources=[dict(name=bag.name, size=st.st_size, mtime=st.st_mtime)])))
@@ -73,7 +71,8 @@ class MapAssociationTests(unittest.TestCase):
             (Path(d)/'cam_20261112_011503_0.bag.mapping.yaml').write_text('image: x.pgm\n')
             (Path(d)/'cam_20261112_011503_0.bag.mapping.bag').write_bytes(b'tf')
             st = bag.stat()
-            (Path(d)/'cam_20261112_011503_0.bag.map.json').write_text(json.dumps(dict(
+            current=Path(map_manifest_path(str(bag)));current.parent.mkdir(parents=True)
+            current.write_text(json.dumps(dict(
                 yaml='cam_20261112_011503_0.bag.mapping.yaml',
                 trajectory='cam_20261112_011503_0.bag.mapping.bag',
                 sources=[dict(name=bag.name, size=st.st_size, mtime=st.st_mtime)])))
@@ -242,7 +241,8 @@ class GeometryTests(unittest.TestCase):
             p = Path(d)/'cam_x_0.bag'; p.write_bytes(b'bag')
             meta = dict(sources=[dict(name=p.name, size=4, mtime=p.stat().st_mtime)],
                         yaml='map.yaml', trajectory='tf.bag')
-            Path(str(p)+'.map.json').write_text(json.dumps(meta))
+            current=Path(map_manifest_path(str(p)));current.parent.mkdir(parents=True)
+            current.write_text(json.dumps(meta))
             with self.assertRaises(ValueError): association(str(p))
 
 

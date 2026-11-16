@@ -2,17 +2,17 @@
 """Transactional session mapping: new outputs first, switch the active map only on success."""
 import argparse
 import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
-from viewer_core import session_files
+from viewer_core import session_files,map_directory,map_manifest_path
 
 HERE=Path(__file__).resolve().parent
 
@@ -29,10 +29,12 @@ def recording_groups(folder):
 def map_artifacts(bag):
     files=session_files(str(bag))
     if not files:return []
-    parent=Path(files[0]).parent
-    candidates=[Path(files[0]+'.map.json')]+list(parent.glob('map_*.yaml'))
-    candidates+=list(parent.glob(Path(files[0]).name+'.mapping.yaml'))
+    candidates=[Path(map_manifest_path(files[0])),Path(map_directory(files[0]))/'map.yaml']
     return [str(p) for p in candidates if p.is_file()]
+
+
+def archive_root():
+    return Path(os.environ.get('BAGTOOLS_ARCHIVE_DIR',str(HERE/'archive'))).expanduser().resolve()
 
 
 def new_job(bag):
@@ -40,8 +42,8 @@ def new_job(bag):
     if not files:raise ValueError('No source bags')
     parent=Path(files[0]).parent
     if list(parent.glob('*.bag.active')):raise ValueError('Recording is still active')
-    key=hashlib.sha256(Path(files[0]).name.encode('utf-8')).hexdigest()[:16]
-    runs=parent/'.bagtools_maps'/key;runs.mkdir(parents=True,exist_ok=True)
+    runs=archive_root()/'builds'/parent.name/Path(map_directory(files[0])).name
+    runs.mkdir(parents=True,exist_ok=True)
     return Path(tempfile.mkdtemp(prefix=datetime.datetime.now(datetime.timezone.utc).strftime('run_%Y%m%d_%H%M%S_'),dir=str(runs)))
 
 
@@ -63,7 +65,7 @@ def source_snapshot(files):
 
 def publish(bag,job,expected_sources,previous):
     """Pointer replacement is the only commit; failed jobs never disturb an old map."""
-    files=session_files(str(bag));job=Path(job);pointer=Path(files[0]+'.map.json')
+    files=session_files(str(bag));job=Path(job);pointer=Path(map_manifest_path(files[0]))
     if source_snapshot(files)!=expected_sources:raise ValueError('Source bags changed during mapping')
     if list(Path(files[0]).parent.glob('*.bag.active')):raise ValueError('Recording is still active')
     current=pointer.read_bytes() if pointer.exists() else None
@@ -72,20 +74,38 @@ def publish(bag,job,expected_sources,previous):
     for field in ('yaml','trajectory'):
         target=(job/'result'/data[field]).resolve()
         if not target.is_file() or (job.resolve() not in target.parents):raise ValueError('Missing mapping output: '+field)
-        data[field]=os.path.relpath(str(target),str(pointer.parent))
+        data[field]=str(target)
     import yaml
     from PIL import Image
-    yamlpath=pointer.parent/data['yaml'];info=yaml.safe_load(yamlpath.read_text())
+    yamlpath=Path(data['yaml']);info=yaml.safe_load(yamlpath.read_text())
     image=Path(info['image']);image=image if image.is_absolute() else yamlpath.parent/image
     if not image.is_file() or image.resolve().parent!=yamlpath.resolve().parent:raise ValueError('Missing map raster')
     with Image.open(str(image)) as raster:
         pixels=raster.convert('L').tobytes()
         if not any(v<90 for v in pixels) or not any(v>205 for v in pixels):raise ValueError('Map is empty')
         data['map_dimensions']=list(raster.size)
-    data.update(sources=expected_sources,map_origin='recomputed_from_session',job=os.path.relpath(str(job),str(pointer.parent)))
+    data.update(sources=expected_sources,map_origin='recomputed_from_session',build_id=job.name)
     if previous is not None:(job/'previous_association.json').write_bytes(previous)
     if (job/'cancel').exists():raise KeyboardInterrupt()
-    atomic_json(pointer,data)
+    current=pointer.parent;current.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.building-',dir=str(current.parent)) as temp:
+        candidate=Path(temp)/'map';candidate.mkdir()
+        shutil.copy2(str(image),str(candidate/'map.pgm'))
+        shutil.copy2(data['trajectory'],str(candidate/'trajectory.bag'))
+        info['image']='map.pgm'
+        with (candidate/'map.yaml').open('w') as f:yaml.safe_dump(info,f)
+        data.update(yaml='map.yaml',trajectory='trajectory.bag')
+        atomic_json(candidate/'association.json',data)
+        backup=None
+        if current.exists():
+            history=archive_root()/'maps'/Path(files[0]).parent.name/current.name
+            history.mkdir(parents=True,exist_ok=True)
+            backup=Path(tempfile.mkdtemp(prefix=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S_'),dir=str(history)))
+            shutil.move(str(current),str(backup/'map'))
+        try:os.replace(str(candidate),str(current))
+        except Exception:
+            if backup is not None:shutil.move(str(backup/'map'),str(current))
+            raise
     return data
 
 
@@ -132,7 +152,7 @@ class MappingJob:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             if list(Path(files[0]).parent.glob('*.bag.active')):raise ValueError('Recording is still active')
             if map_artifacts(self.bag) and not self.replace:raise ValueError('A map already exists; replacement was not confirmed')
-            pointer=Path(files[0]+'.map.json');previous=pointer.read_bytes() if pointer.exists() else None
+            pointer=Path(map_manifest_path(files[0]));previous=pointer.read_bytes() if pointer.exists() else None
             sources=source_snapshot(files)
             (self.job/'request.json').write_text(json.dumps(dict(bag=self.bag,sources=sources,replace=self.replace),indent=2))
             probe=self.run_command(['python2',str(HERE/'mapping_probe.py'),self.bag],'inspect',True)
@@ -146,15 +166,18 @@ class MappingJob:
             self.run_command(command,'rebuild')
             if (self.job/'cancel').exists():raise KeyboardInterrupt()
             self.update('verify');data=publish(self.bag,self.job,sources,previous)
-            self.update('complete',state='complete',association=files[0]+'.map.json',map=data['yaml'])
+            self.update('complete',state='complete',association=str(pointer),map=str(pointer.parent/data['yaml']))
 
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('bag');ap.add_argument('--job',required=True);ap.add_argument('--replace',action='store_true');args=ap.parse_args()
-    task=MappingJob(args.bag,args.job,args.replace)
+    ap=argparse.ArgumentParser();ap.add_argument('bag');ap.add_argument('--job');ap.add_argument('--replace',action='store_true');args=ap.parse_args()
+    task=MappingJob(args.bag,args.job or new_job(args.bag),args.replace)
     def cancel(_sig,_frame):task.cancelled=True
     signal.signal(signal.SIGTERM,cancel);signal.signal(signal.SIGINT,cancel)
-    try:task.run();return 0
+    try:
+        task.run()
+        if not args.job:print(json.dumps(task.state,indent=2))
+        return 0
     except KeyboardInterrupt:task.update('cancelled',state='cancelled');return 130
     except Exception as exc:task.update('failed',state='failed',error=str(exc));return 1
 
