@@ -16,6 +16,7 @@ classes={'/camera/rgb/image_raw':Image,'/camera/depth/image_raw':Image,'/scan':L
          '/tf':TFMessage,'/camera/rgb/camera_info':CameraInfo,'/camera/depth/camera_info':CameraInfo}
 pubs={t:rospy.Publisher(t,c,queue_size=1,latch=t.endswith('camera_info')) for t,c in classes.items()}
 sequence=0
+frozen_odom=None
 wall_start=time.time(); monotonic_start=monotonic()
 while not rospy.is_shutdown():
     drop=open(sys.argv[1]).read().strip() if os.path.exists(sys.argv[1]) else ''
@@ -25,6 +26,9 @@ while not rospy.is_shutdown():
         if cls==CameraInfo and sequence>0: continue
         msg=cls()
         if hasattr(msg,'header'): msg.header.stamp=now; msg.header.seq=sequence; msg.header.frame_id='camera_color_optical_frame'
+        if topic=='/odom' and drop=='odom_frozen':
+            if frozen_odom is None:frozen_odom=now
+            msg.header.stamp=frozen_odom
         if cls==Image:
             msg.width=12; msg.height=8; msg.encoding='rgb8' if 'rgb' in topic else '16UC1'
             msg.step=36 if 'rgb' in topic else 24
@@ -37,6 +41,7 @@ while not rospy.is_shutdown():
             msg.header.frame_id='laser'; msg.range_min=.1; msg.range_max=10.; msg.angle_min=-3.14; msg.angle_increment=6.28/360; msg.ranges=[3.]*360
         elif cls==TFMessage:
             tr=TransformStamped(); tr.header.stamp=now; tr.header.frame_id='odom'; tr.child_frame_id='base_footprint'; tr.transform.rotation.w=1.
+            if drop=='tf_clock_back':tr.header.stamp=now-rospy.Duration(.646171)
             msg.transforms=[tr]
             for parent,child in [('base_footprint','base_link'),('base_link','camera_link'),
                                  ('camera_link','camera_color_optical_frame'),('base_link','laser')]:

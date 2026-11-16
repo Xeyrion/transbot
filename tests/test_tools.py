@@ -373,7 +373,7 @@ class LifecycleTests(unittest.TestCase):
                 script = script.replace('"$HOME/software/', '"/nonexistent/software/').replace('"$HOME/transbot_ws/', '"/nonexistent/transbot_ws/')
                 (root/'auto.sh').write_text(script)
                 (root/'calibration_schema.py').write_bytes((ROOT/'calibration_schema.py').read_bytes())
-                for helper in ['session_finalize.py', 'record_quality.py', 'record_guard.py','live_health.py','stream_health.py']:
+                for helper in ['session_finalize.py', 'record_quality.py', 'record_guard.py','live_health.py','stream_health.py','clock_check.py']:
                     (root/helper).write_bytes((ROOT/'recording'/helper).read_bytes())
                 for name, body in {
                     'rostopic': '#!/bin/sh\n[ "$1" = list ] && printf "/scan\\n/odom\\n/tf\\n"; exit 0\n',

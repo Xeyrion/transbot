@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='bagtools-live-') as d:
         start(['python2',str(root/'tests/live_fixture_publish.py'),str(drop)])
         time.sleep(2)
         results=[]
-        for name,inject in [('normal',False),('depth_stall',True),('full_wrapper_cancel',False)]:
+        for name,inject in [('normal',False),('depth_stall',True),('tf_clock_back','tf_clock_back'),('odom_frozen','odom_frozen'),('full_wrapper_cancel',False)]:
             if drop.exists(): drop.unlink()
             folder=tmp/name; log=open(str(tmp/(name+'.log')),'wb')
             cmd=['bash',str(root/'recording/auto_record_cam.sh'),'-p','full','-d','4' if not inject else '15','-o',str(folder)]
@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='bagtools-live-') as d:
                     if time.monotonic()>deadline: raise RuntimeError('No active bag in '+name+': '+(tmp/(name+'.log')).read_text()[-6000:])
                     time.sleep(.1)
                 time.sleep(2)
-                if inject: drop.write_text('/camera/depth/image_raw')
+                if inject: drop.write_text('/camera/depth/image_raw' if inject is True else inject)
                 else: p.terminate()
             p.wait(timeout=50); log.close()
             paths=list(folder.glob('session_*/*.session.json')); assert len(paths)==1,(name,(tmp/(name+'.log')).read_text())

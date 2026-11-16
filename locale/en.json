@@ -350,5 +350,7 @@
   "建图失败，原地图保留：": "Mapping failed; the previous map was retained: ",
   "请先完成或取消建图，再关闭数据阅读。": "Finish or cancel mapping before closing the session browser.",
   "此分卷不在新地图有效时段内，显示原始里程计视图。": "This split is outside the new map interval; showing the original odometry view.",
-  "新地图仅覆盖连续片段，时间轴已限制到该片段。": "The new map covers a continuous segment only. The timeline is limited to that segment."
+  "新地图仅覆盖连续片段，时间轴已限制到该片段。": "The new map covers a continuous segment only. The timeline is limited to that segment.",
+  "ERROR: 时钟检查失败；先停止数据源并完成对时，再重新启动传感器/EKF。": "ERROR: Clock check failed. Stop the data sources, synchronize time, then restart the sensors/EKF.",
+  "== 录前时钟检查（只读，不在运行中的 EKF 上跳时）==": "== Recording clock check (read-only; no time steps while EKF is running) =="
 }

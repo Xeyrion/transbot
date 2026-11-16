@@ -124,7 +124,8 @@ unset ROS_HOSTNAME
 
 # ---------- 自检 ----------
 run_preflight() {
-  setsid bash "$SCRIPT_DIR/preflight.sh" "$@" &
+  # Sensor launchers may outlive preflight; only this wrapper owns the lock.
+  setsid bash "$SCRIPT_DIR/preflight.sh" "$@" 9>&- &
   CHECK_PID=$!
   local result=0
   wait "$CHECK_PID" || result=$?

@@ -56,7 +56,7 @@ if [ "$MAX_SPLITS" -gt 0 ] && [ "${ALLOW_RING_BUFFER:-0}" != 1 ]; then
   echo 'ERROR: ring-buffer deletion requires explicit ALLOW_RING_BUFFER=1' >&2
   exit 2
 fi
-for helper in session_finalize.py record_quality.py record_guard.py live_health.py stream_health.py; do
+for helper in session_finalize.py record_quality.py record_guard.py live_health.py stream_health.py clock_check.py; do
   [ -f "$SCRIPT_DIR/$helper" ] || { echo "ERROR: incomplete recorder deployment: $helper" >&2; exit 1; }
 done
 command -v python2 >/dev/null || { echo 'ERROR: python2 rosbag reader is required for finalization' >&2; exit 1; }
@@ -128,6 +128,13 @@ if [ -z "${ROS_IP:-}" ]; then
   [ -n "$_ip" ] && export ROS_IP="$_ip"
 fi
 unset ROS_HOSTNAME
+
+if ! CLOCK_REPORT=$(python3 "$SCRIPT_DIR/clock_check.py"); then
+  echo "$CLOCK_REPORT" >&2
+  echo 'ERROR: 时钟检查失败；先停止数据源并完成对时，再重新启动传感器/EKF。' >&2
+  exit 1
+fi
+echo "$CLOCK_REPORT"
 
 # ---------- 环境提示 ----------
 ARCH=$(uname -m)
@@ -264,6 +271,7 @@ fi
 echo "本次会话目录：$OUT_DIR"
 STAMP=$(date +%Y%m%d_%H%M%S)
 BAG="$OUT_DIR/cam_${STAMP}.bag"
+printf '%s\n' "$CLOCK_REPORT" > "$OUT_DIR/cam_$STAMP.clock.json"
 
 ARGS=(--lz4 --split --size="$SPLIT_MB")
 [ "$MAX_SPLITS" -gt 0 ] 2>/dev/null && ARGS+=(--max-splits="$MAX_SPLITS")

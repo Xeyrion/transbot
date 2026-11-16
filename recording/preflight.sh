@@ -122,6 +122,8 @@ fix_all() {
   fi
 }
 
+echo '== 录前时钟检查（只读，不在运行中的 EKF 上跳时）=='
+python3 "$HERE/clock_check.py" || exit 1
 check_all
 if [ "$FAILED" -gt 0 ] && [ "$FIX" -eq 1 ]; then
   fix_all

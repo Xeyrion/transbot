@@ -9,7 +9,7 @@ import os
 import struct
 import threading
 import time
-from stream_health import StreamHealth, LATCHED
+from stream_health import StreamHealth, LATCHED, ODOM_TF
 
 
 def monotonic():
@@ -33,18 +33,29 @@ def main():
     try:
         import rospy
         from rospy.msg import AnyMsg
+        from tf2_msgs.msg import TFMessage
         rospy.init_node('bagtools_stream_health',anonymous=True,disable_signals=True)
         def callback(msg,topic):
+            now=monotonic()
             stamp=None
-            if topic != '/tf' and topic not in LATCHED:
+            if topic == '/tf':
+                try:
+                    transforms=TFMessage().deserialize(msg._buff).transforms
+                    with lock:
+                        for tr in transforms:
+                            if (tr.header.frame_id.strip('/'),tr.child_frame_id.strip('/'))==('odom','base_footprint'):
+                                health.observe(ODOM_TF,now,tr.header.stamp.to_sec())
+                except Exception:
+                    with lock: health.fault='invalid_tf_message'
+            elif topic not in LATCHED:
                 try:
                     _,sec,nsec=struct.unpack_from('<III',msg._buff)
                     stamp=sec+nsec/1e9
                 except Exception:
                     with lock: health.fault='invalid_header:'+topic
-            with lock: health.observe(topic,monotonic(),stamp)
+            with lock: health.observe(topic,now,stamp)
         subscribers=[rospy.Subscriber(t,AnyMsg,callback,callback_args=t,queue_size=1,buff_size=2**22)
-                     for t in health.required]
+                     for t in health.subscriptions]
         while not rospy.is_shutdown():
             with lock: snapshot=health.snapshot(monotonic())
             save(snapshot); time.sleep(.2)
