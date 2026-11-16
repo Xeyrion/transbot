@@ -44,8 +44,12 @@ datasets/cracks/<会话>/
 ```bash
 labelme datasets/cracks/structure_lab_11_11/images \
   --output datasets/cracks/structure_lab_11_11/annotations \
-  --labels datasets/cracks/structure_lab_11_11/labels.txt --nodata
+  --labels datasets/cracks/structure_lab_11_11/labels.txt
 ```
+
+Labelme 7 默认不把图片嵌入 JSON，无需旧版的 `--nodata` 参数。
+Windows 本批已筛选的图片位于 `selection/selected/`，双击同目录上一级的
+`selection/start_labelme.cmd`，标注保存到 `selection/annotations/`。
 
 Labelme 中放大图片，沿裂缝两侧画闭合多边形，类别统一为 `crack`。
 二分类语义分割不必给每条分支不同的实例编号。多边形可在训练前转换为与原图同尺寸的
