@@ -1,0 +1,176 @@
+"""Run explicitly inside xvfb: BAGTOOLS_GUI_TEST=1 python3 -m unittest discover -s tests."""
+import os
+from pathlib import Path
+import sys
+import tempfile
+import time
+import unittest
+import gc
+from unittest.mock import patch,Mock
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+
+
+@unittest.skipUnless(os.environ.get('BAGTOOLS_GUI_TEST')=='1','requires isolated Xvfb display')
+class GuiTests(unittest.TestCase):
+    def setUp(self):
+        import tkinter as tk
+        import bag_quality_gui as gui
+        self.gui=gui;self.root=tk.Tk()
+        self.tmp=tempfile.TemporaryDirectory();self.folder=Path(self.tmp.name)
+        self.old_server=gui.SERVER;self.old_probe=gui.PROBE
+
+    def tearDown(self):
+        self.gui.SERVER=self.old_server;self.gui.PROBE=self.old_probe
+        try:self.root.destroy()
+        except Exception:pass
+        self.root=None
+        gc.collect()  # Dispose Tcl interpreters on the UI thread, before another test starts workers.
+        self.tmp.cleanup()
+
+    def pump(self, predicate, seconds=5):
+        end=time.monotonic()+seconds
+        while time.monotonic()<end:
+            self.root.update();time.sleep(.005)
+            if predicate():return
+        self.fail('UI condition timed out')
+
+    def test_immediate_window_loading_then_ready(self):
+        server=self.folder/'server.py'
+        server.write_text('''import json,sys,time
+time.sleep(.75)
+print(json.dumps(dict(dur=5,world='base',has_map=False)));sys.stdout.flush()
+while True:
+ line=sys.stdin.readline()
+ if not line:break
+ q=json.loads(line)
+ if q.get('cmd')=='close':break
+ print(json.dumps(dict(t=q['t'],frame='base',pose=[0,0,0],err=None)));sys.stdout.flush()
+''')
+        self.gui.SERVER=str(server)
+        start=time.monotonic();v=self.gui.BagViewer(self.root,str(self.folder),'unused.bag')
+        self.assertLess(time.monotonic()-start,.5)
+        self.root.update()
+        self.assertTrue(v.winfo_ismapped())
+        self.assertTrue(v._loading)
+        self.assertTrue(v.loading_frame.winfo_ismapped())
+        self.pump(lambda:not v._loading)
+        self.assertFalse(v.loading_frame.winfo_ismapped())
+        self.assertIn('5.0',v.var_t.get())
+        v.close()
+
+    def test_failure_stops_spinner(self):
+        server=self.folder/'broken.py';server.write_text("raise RuntimeError('test reader failure')\n")
+        self.gui.SERVER=str(server)
+        v=self.gui.BagViewer(self.root,str(self.folder),'unused.bag')
+        self.pump(lambda:v._load_error)
+        self.assertIn('test reader failure',v.var_loading.get())
+        self.assertFalse(v._loading)
+        v.close()
+
+    def test_session_selection_and_nonblocking_preview(self):
+        session=self.folder/'session_test';session.mkdir();(session/'cam_test_0.bag').write_bytes(b'fake')
+        probe=self.folder/'probe.py'
+        probe.write_text("import sys,time\ntime.sleep(.4)\nopen(sys.argv[sys.argv.index('--frame')+1],'wb').write(b'P6\\n1 1\\n255\\n'+b'\\0\\0\\0')\n")
+        self.gui.PROBE=str(probe)
+        app=self.gui.App(self.root,str(self.folder));self.root.update()
+        self.assertEqual(app.mode,'sessions');self.assertFalse(app.body.winfo_ismapped())
+        app.catalog.selection_set(app.catalog.get_children()[0]);app.open_session();self.root.update()
+        self.assertEqual(app.mode,'bags');self.assertEqual(len(app.tree.get_children()),1)
+        start=time.monotonic();app._show_preview('cam_test_0.bag')
+        self.assertLess(time.monotonic()-start,.1)
+        ticks=[];self.root.after(30,lambda:ticks.append(True))
+        self.pump(lambda:bool(ticks));self.assertFalse(app._preview_job.done())
+        self.pump(lambda:app._photo is not None)
+        app.back_sessions();self.root.update();self.assertEqual(app.mode,'sessions')
+        app.close()
+
+    def test_session_rename_keeps_timestamp(self):
+        session = self.folder/'session_20261111_014312_MZgKPg'
+        session.mkdir(); (session/'cam_20261111_014312_0.bag').write_bytes(b'fake')
+        app = self.gui.App(self.root, str(self.folder)); self.root.update()
+        app.catalog.selection_set(app.catalog.get_children()[0])
+        with patch.object(self.gui.simpledialog, 'askstring', return_value='走廊建图'):
+            app.rename_session()
+        self.root.update()
+        renamed = self.folder/'session_20261111_014312_走廊建图'
+        self.assertTrue(renamed.is_dir(), 'timestamp prefix must survive a rename')
+        self.assertFalse(session.exists())
+        self.assertEqual(app.catalog.item(app.catalog.get_children()[0], 'values')[0],
+                         'session_20261111_014312_走廊建图')
+        app.close()
+
+    def test_mapping_decline_keeps_folder_unchanged(self):
+        session=self.folder/'session_test';session.mkdir();(session/'cam_20261115_120000_0.bag').write_bytes(b'bag')
+        (session/'map_old.yaml').write_text('old map')
+        app=self.gui.App(self.root,str(self.folder));self.root.update()
+        app.catalog.selection_set(app.catalog.get_children()[0])
+        with patch.object(self.gui.messagebox,'askyesno',return_value=False) as ask, \
+             patch.object(self.gui,'new_job') as create:
+            app.build_map()
+        ask.assert_called_once();create.assert_not_called()
+        self.assertIsNone(app._mapping_proc);self.assertFalse((session/'.bagtools_maps').exists())
+        app.close()
+
+    def test_mapping_window_is_nonblocking_and_cancel_is_a_request(self):
+        import mapping_job
+        session=self.folder/'session_test';session.mkdir();bag=session/'cam_20261115_120000_0.bag';bag.write_bytes(b'bag')
+        app=self.gui.App(self.root,str(self.folder));self.root.update()
+        app.catalog.selection_set(app.catalog.get_children()[0])
+        child=Mock();child.poll.return_value=None
+        with patch.object(self.gui.subprocess,'Popen',return_value=child):
+            start=time.monotonic();app.build_map()
+            self.assertLess(time.monotonic()-start,.5)
+        self.root.update();self.assertTrue(app._mapping_window.winfo_ismapped());self.assertTrue(app.busy)
+        app.cancel_mapping();self.assertTrue((app._mapping_job/'cancel').exists())
+        child.terminate.assert_not_called()
+        mapping_job.atomic_json(app._mapping_job/'status.json',dict(state='cancelled',stage='cancelled'))
+        child.poll.return_value=130;app._mapping_next_poll=0;app._poll_mapping()
+        self.assertFalse(app.busy);self.assertIsNone(app._mapping_proc)
+        app.cancel_mapping();app.close()
+
+    def test_rename_refuses_live_session_and_root(self):
+        live = self.folder/'session_20261111_014312_live'
+        live.mkdir(); (live/'cam_20261111_014312_0.bag.active').touch()
+        app = self.gui.App(self.root, str(self.folder)); self.root.update()
+        app.catalog.selection_set(app.catalog.get_children()[0])
+        with patch.object(self.gui.messagebox, 'showinfo') as info, \
+             patch.object(self.gui.simpledialog, 'askstring') as ask:
+            app.rename_session()
+        info.assert_called_once()
+        ask.assert_not_called()
+        self.assertTrue(live.is_dir())
+        app.close()
+
+    def test_start_args_carry_the_session_name(self):
+        import record_gui
+        self.assertEqual(record_gui.start_args(300, '/home/jetson/bags'),
+                         ['start', '-d', '300', '-o', '/home/jetson/bags'])
+        self.assertEqual(record_gui.start_args(60, '/b', '走廊建图'),
+                         ['start', '-d', '60', '-o', '/b', '-n', '走廊建图'])
+
+    def test_workbench_launches_without_folder_navigation(self):
+        from workbench import Workbench
+        with patch.dict(os.environ,{'BAGTOOLS_CACHE_DIR':str(self.folder)}):
+            home=Workbench(self.root,str(self.folder/'data'))
+            child=Mock();child.poll.return_value=None
+            with patch('workbench.subprocess.Popen',return_value=child) as spawn:
+                home.open_tool('record')
+                home.open_tool('record')
+                self.assertEqual(spawn.call_count,1)
+                self.assertEqual(spawn.call_args[1]['env']['LOCAL_DIR'],str(self.folder/'data'))
+                home.close()
+                child.terminate.assert_not_called()
+
+    def test_english_workbench_and_recorder_labels(self):
+        from workbench import Workbench
+        with patch.dict(os.environ,{'BAGTOOLS_LANG':'en'}):
+            home=Workbench(self.root,str(self.folder/'data'))
+            self.root.update()
+            self.assertEqual(home.buttons['record'].cget('text'),'Recording Console')
+            self.assertEqual(home.buttons['review'].cget('text'),'Session Browser')
+            self.assertEqual(self.root.title(),'Transbot Data Workbench')
+            home.close()
+
+
+if __name__=='__main__':unittest.main()
