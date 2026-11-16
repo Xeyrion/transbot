@@ -4,16 +4,16 @@
 
     python2 extract_images.py <bag或会话目录> <输出目录> [--fps 1] [--max 300]
 
-为什么不能直接抽所有帧：30 Hz 的包里一秒有 30 张几乎一样的图，标起来是灾难。
-这里按 fps 抽样，再用缩略图差分去掉近似重复的帧，保证每张都有新内容。
-
-输出 `<会话名>_<时间戳>.jpg`，文件名带时间戳，方便回头对回原包。
+按 fps 抽样，可选缩略图差分去重。裂缝标注推荐 --format png --diff 0，
+保留细节。--time-source record 仅按 bag 记录时间抽图，不用于 RGB-D 同步。
+images.json 保留原始 Header、记录时间、分卷和帧号，方便追溯。
 """
 import argparse
 import os
 import sys
 import json
 import re
+import math
 
 
 if sys.version_info[0] != 2:
@@ -55,10 +55,14 @@ def main():
     ap.add_argument('--fps', type=float, default=1.0, help='每秒抽几张')
     ap.add_argument('--max', type=int, default=300)
     ap.add_argument('--jpeg', type=int, default=92)
+    ap.add_argument('--format', choices=['jpg', 'png'], default='jpg')
+    ap.add_argument('--time-source', choices=['header', 'record'], default='header',
+                    help='抽样时钟；record 可用于 Header 回退的独立图片导出')
     ap.add_argument('--diff', type=float, default=1.5,
                     help='和上一张的缩略图差小于这个值就跳过（0=不去重）')
     args = ap.parse_args()
-    if args.fps<=0 or args.max<=0 or not 1<=args.jpeg<=100 or args.diff<0:
+    if (args.fps<=0 or math.isnan(args.fps) or math.isinf(args.fps) or args.max<=0
+            or not 1<=args.jpeg<=100 or args.diff<0 or math.isnan(args.diff) or math.isinf(args.diff)):
         ap.error('Invalid sampling/encoding limits')
 
     files = session_files(args.bag)
@@ -67,44 +71,76 @@ def main():
     stem=matched.group(1) if matched else os.path.basename(files[0])[:-4]
     if os.path.exists(args.outdir): ap.error('Output exists; use a new directory')
     os.makedirs(args.outdir)
-    manifest=dict(schema_version=1,state='running',images=[],sources=files)
+    manifest=dict(schema_version=2,state='running',images=[],sources=files,
+                  time_source=args.time_source, fps=args.fps, format=args.format,
+                  max_images=args.max, diff=args.diff, topic=RGB)
     with open(os.path.join(args.outdir,'images.json'),'w') as f: json.dump(manifest,f)
-    clock=HeaderIndex(); next_t=None
+    clock=HeaderIndex(); next_t=None; previous_header=None; previous_record=None
 
     step = 1.0 / args.fps
-    n = 0
     kept = 0
     skipped = 0
     last = None
-    for path in files:
-        bag = rosbag.Bag(path)
-        end = bag.get_end_time()
-        for topic, msg, _t in bag.read_messages(topics=[RGB]):
-            stamp = msg.header.stamp.to_sec()
-            clock.add(stamp,_t.to_sec(),path,msg.header.seq)
-            if next_t is not None and stamp < next_t:
-                continue
-            next_t = stamp + step
-            img = to_array(msg)
-            if last is not None and args.diff > 0 and thumb_diff(last, img) < args.diff:
-                skipped += 1
-                continue
-            last = img
-            name = '%s_t%d_s%d_i%06d.jpg' % (stem,int(round(stamp*1e9)),msg.header.seq,kept)
-            Image.fromarray(img).save(os.path.join(args.outdir, name),
-                                      quality=args.jpeg, optimize=True)
-            manifest['images'].append(dict(name=name,stamp=stamp,bag=path,seq=msg.header.seq,session_id=stem))
-            kept += 1
-            n += 1
-            if n >= args.max:
+    regressions = []
+    record_regressions = []
+    seen = 0
+    try:
+        for path in files:
+            with rosbag.Bag(path) as bag:
+                for topic, msg, _t in bag.read_messages(topics=[RGB]):
+                    stamp = msg.header.stamp.to_sec()
+                    record = _t.to_sec()
+                    seen += 1
+                    if previous_header is not None and stamp < previous_header - 1e-6:
+                        regressions.append(dict(bag=path,seq=msg.header.seq,
+                            previous_header=previous_header,stamp=stamp,record_stamp=record))
+                    previous_header = stamp
+                    if args.time_source == 'header':
+                        clock.add(stamp,record,path,msg.header.seq)
+                        sample_time = stamp
+                    else:
+                        if previous_record is not None and record < previous_record - 1e-6:
+                            # Independent images need no continuous pose clock. Restart
+                            # sampling in a new epoch without changing source timestamps.
+                            record_regressions.append(dict(bag=path,seq=msg.header.seq,
+                                previous_record=previous_record,record_stamp=record))
+                            next_t = None
+                        sample_time = record
+                    previous_record = record
+                    if next_t is not None and sample_time < next_t:
+                        continue
+                    next_t = sample_time + step
+                    img = to_array(msg)
+                    if last is not None and args.diff > 0 and thumb_diff(last, img) < args.diff:
+                        skipped += 1
+                        continue
+                    last = img
+                    name = '%s_t%d_s%d_i%06d.%s' % (stem,msg.header.stamp.to_nsec(),
+                                                               msg.header.seq,kept,args.format)
+                    options = dict(quality=args.jpeg, optimize=True) if args.format == 'jpg' else {}
+                    Image.fromarray(img).save(os.path.join(args.outdir,name),**options)
+                    manifest['images'].append(dict(name=name,stamp=stamp,record_stamp=record,
+                        stamp_ns=msg.header.stamp.to_nsec(),record_stamp_ns=_t.to_nsec(),
+                        bag=path,seq=msg.header.seq,session_id=stem,width=msg.width,
+                        height=msg.height,source_encoding=msg.encoding,
+                        record_epoch=len(record_regressions)))
+                    kept += 1
+                    if kept >= args.max:
+                        break
+            if kept >= args.max:
                 break
-        bag.close()
-        if n >= args.max:
-            break
-
-    manifest.update(state='complete' if kept else 'failed',skipped_similar=skipped)
-    with open(os.path.join(args.outdir,'images.json'),'w') as f: json.dump(manifest,f,indent=2)
-    if not kept: raise ValueError('No usable images were exported')
+        if not kept:
+            raise ValueError('No usable images were exported')
+        manifest['state'] = 'complete'
+    except BaseException as exc:
+        manifest.update(state='failed',error=str(exc))
+        raise
+    finally:
+        manifest.update(skipped_similar=skipped,frames_scanned=seen,
+                        header_regressions=regressions,record_regressions=record_regressions,
+                        limit_reached=kept >= args.max)
+        with open(os.path.join(args.outdir,'images.json'),'w') as f:
+            json.dump(manifest,f,indent=2)
     print('抽出 %d 张（跳过近似重复 %d 张）→ %s' % (kept, skipped, args.outdir))
 
 

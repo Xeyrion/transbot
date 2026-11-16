@@ -86,8 +86,41 @@ try:
     import extract_images
     bgr=Image(); bgr.width=bgr.height=1; bgr.encoding='bgr8'; bgr.step=3; bgr.data=bytes(bytearray([1,2,3]))
     assert extract_images.to_array(bgr).tolist()==[[[3,2,1]]]
+    # Independent image export can sample record time despite a sensor clock reset.
+    reset_path=os.path.join(scratch,'cam_20260101_000000_0.bag')
+    pixels=np.arange(18,dtype=np.uint8).reshape(2,3,3)
+    with rosbag.Bag(reset_path,'w') as bag:
+        for n,stamp in enumerate([30.,31.,29.]):
+            msg=Image(); msg.width=3; msg.height=2; msg.step=12; msg.encoding='bgr8'
+            msg.header.seq=n; msg.header.stamp=rospy.Time.from_sec(stamp)
+            # Nonzero row padding must not leak into the lossless output.
+            padded=np.full((2,12),255,dtype=np.uint8)
+            padded[:,:9]=pixels[:,:,::-1].reshape(2,9)
+            msg.data=padded.tostring()
+            bag.write(extract_images.RGB,msg,rospy.Time.from_sec(40.+n))
+    with rosbag.Bag(os.path.join(scratch,'cam_20260101_000000_1.bag'),'w') as bag:
+        msg.header.stamp=rospy.Time.from_sec(28.); msg.header.seq=3
+        bag.write(extract_images.RGB,msg,rospy.Time.from_sec(39.))
+    png_out=os.path.join(scratch,'png')
+    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
+        png_out,'--format','png','--time-source','record','--diff','0','--fps','1'])
+    png_manifest=json.load(open(os.path.join(png_out,'images.json')))
+    assert png_manifest['state']=='complete' and len(png_manifest['images'])==4
+    assert len(png_manifest['header_regressions'])==2 and len(png_manifest['record_regressions'])==1
+    for n,item in enumerate(png_manifest['images']):
+        assert item['record_stamp']==[40.,41.,42.,39.][n] and item['width']==3 and item['height']==2
+        assert item['record_epoch']==(1 if n==3 else 0)
+        assert item['name'].endswith('.png')
+        assert np.array_equal(np.asarray(PillowImage.open(os.path.join(png_out,item['name']))),pixels)
+    failed_out=os.path.join(scratch,'header_reset')
+    proc=subprocess.Popen(['python2',os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
+        failed_out,'--diff','0'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    proc.communicate(); assert proc.returncode!=0
+    failed=json.load(open(os.path.join(failed_out,'images.json')))
+    assert failed['state']=='failed' and 'regressed' in failed['error']
     print(json.dumps(dict(state='passed',checks=['moving_rgb_depth_geometry','bounded_header_pairing',
         'latched_intrinsics_in_segment','big_endian_depth','target_dimensions','map_vertical_orientation',
-        'output_reuse_refused','subsecond_image_names','bgr_channel_conversion']),indent=2))
+        'output_reuse_refused','subsecond_image_names','bgr_channel_conversion',
+        'record_time_clock_reset_export','lossless_png_with_stride','failed_export_manifest']),indent=2))
 finally:
     shutil.rmtree(scratch)

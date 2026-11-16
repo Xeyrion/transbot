@@ -23,6 +23,7 @@ bagtools/
   bags/<会话>/         原始 bag 与会话信息
     maps/<录制名>/     当前地图、轨迹、association.json
   results/             当前研究输出（例如语义运行）
+  datasets/            抽取原图、人工标注与数据集说明（不提交 Git）
   archive/             旧地图、构建日志、实验、历史报告与备份
 ```
 
@@ -35,6 +36,7 @@ bagtools/
 - [架构与目录](docs/architecture.md)
 - [相机外参](docs/calibration.md)
 - [语义算法](docs/semantic_algorithm.md)
+- [裂缝图片与分割标注](semantic/LABELING.md)
 - [项目状态](docs/project_status.md)
 
 ## 命令行
