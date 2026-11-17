@@ -47,6 +47,20 @@ try:
                 msg=Image(); msg.header.seq=n; msg.header.frame_id=frame; msg.header.stamp=rospy.Time.from_sec(s)
                 msg.width=12; msg.height=8; msg.encoding=encoding; msg.step=step; msg.data=data
                 bag.write(topic,msg,rospy.Time.from_sec(s+.002))
+    # Fresh sessions without any map association must still preview RGB/depth.
+    reader=subprocess.Popen(['python2',os.path.join(ROOT,'bag_viewer_server.py'),path],
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    try:
+        metadata=json.loads(reader.stdout.readline())
+        assert metadata['world']=='odom' and metadata['map_info'] is None,metadata
+        reader.stdin.write(json.dumps(dict(t=.25,frame='base'))+'\n');reader.stdin.flush()
+        frame=json.loads(reader.stdout.readline())
+        assert frame['err'] is None and os.path.isfile(frame['rgb']) and os.path.isfile(frame['depth']),frame
+        reader.stdin.write('{"cmd":"close"}\n');reader.stdin.flush()
+        assert reader.wait()==0
+    finally:
+        if reader.poll() is None:reader.terminate();reader.wait()
+        reader.stdin.close();reader.stdout.close();reader.stderr.close()
     out=os.path.join(scratch,'frames')
     subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_frames.py'),path,out,
                            '--max','3','--step','.09','--root','odom'])

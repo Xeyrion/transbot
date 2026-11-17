@@ -177,7 +177,7 @@ def main():
         linked = None
     map_note=None
     replaces_map=not linked or bool(linked.get('replace_map_odom'))
-    bounds=linked.get('record_bounds') if replaces_map else None
+    bounds=linked.get('record_bounds') if linked and replaces_map else None
     t0,t1,usable,trimmed=mapped_window(t0,t1,linked)
     if not usable:
         linked=None
