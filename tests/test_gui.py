@@ -106,6 +106,9 @@ while True:
         self.assertEqual(v.world, 'map')
         self.assertEqual(v._export_rgb.getpixel((5, 20)), self.gui.COLORS['fused'])
         self.assertIsNotNone(v._map_panel)
+        with patch.object(self.gui,'draw_detections',wraps=self.gui.draw_detections) as draw:
+            v._apply(dict(v._last))
+            draw.assert_not_called()  # Same semantic sample while the timeline advances.
         marked = v._map_panel.tobytes()
         v.var_points.set(False);v._redraw_semantic()
         self.assertNotEqual(marked, v._map_panel.tobytes())
@@ -117,6 +120,30 @@ while True:
         v._last['semantic']['run_id']='trial_B1';v.export_combo()
         v._last['semantic']['run_id']='trial_C2';v.export_combo()
         self.assertEqual(len(list((self.folder/'exports').glob('*_trial_*.png'))),2)
+        initial_width=v.cv.winfo_width()
+        self.assertGreater(v.body.sashpos(0),100,'initial RGB pane must remain visible')
+        v.set_layout('map')
+        self.pump(lambda:v.cv.winfo_width()>initial_width+80)
+        self.pump(lambda:v._ph_rgb.width()==v.lbl_rgb.winfo_width())
+        photo=v._ph_rgb;v._redraw_view();self.assertIs(photo,v._ph_rgb)
+        v.open_map_window()
+        self.pump(lambda:v._ph_map_large is not None)
+        self.assertGreater(v._large_canvas.winfo_width(),v.cv.winfo_width())
+        span=v._viewports[v.cv].span;centre=v._viewports[v.cv].centre
+        v.zoom_map(.8)
+        self.assertAlmostEqual(v._viewports[v.cv].span,span*.8)
+        self.assertEqual(v._viewports[v.cv].centre,centre)
+        v.overview_map();self.assertAlmostEqual(v._viewports[v.cv].span,span)
+        v._close_map_window()
+        with patch.object(v,'_open_path') as opened:
+            v.open_results();opened.assert_called_once_with('/semantic/test')
+        def export_saved(folder,**kwargs):
+            self.assertEqual(folder,'/semantic/test');time.sleep(.15)
+            return str(self.folder/'final_semantic_map.png')
+        with patch.object(self.gui,'export_final_map',side_effect=export_saved),patch.object(v,'_open_path') as opened:
+            start=time.monotonic();v.open_final_map();self.assertLess(time.monotonic()-start,.1)
+            self.pump(lambda:opened.called)
+            opened.assert_called_once_with(str(self.folder/'final_semantic_map.png'))
         v.semantic_picker.current(0);v._select_semantic()
         self.pump(lambda:not v._last.get('semantic'))
         self.assertEqual(v.world, 'base')

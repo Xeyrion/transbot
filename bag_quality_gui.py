@@ -27,8 +27,8 @@ import time
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from session_catalog import sessions, bag_names, rename_target
-from viewer_core import world_to_view
-from semantic_replay import draw_detections, label_size, COLORS
+from semantic_replay import draw_detections, COLORS
+from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_final_map
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 
 import tkinter as tk
@@ -747,11 +747,6 @@ class BagViewer(tk.Toplevel):
         self.geometry('%dx%d+40+20' % (
             min(1400, self.winfo_screenwidth() - 60),
             min(820, self.winfo_screenheight() - 90)))
-        vw=min(1400,self.winfo_screenwidth()-60);vh=min(820,self.winfo_screenheight()-90)
-        self._right_width=360 if vw>=1280 else 300
-        self._rgb_size=(min(880,max(240,vw-self._right_width-40)),min(560,max(180,vh-120)))
-        self._depth_size=(self._right_width-20,min(210,max(100,(self._rgb_size[1]-40)//2)))
-        self._canvas_height=min(300,max(160,self._rgb_size[1]-self._depth_size[1]-40))
         self.bag = bag
         self.folder = folder
         self.dur = 0.0
@@ -790,6 +785,17 @@ class BagViewer(tk.Toplevel):
         self._record_t0 = 0.
         self._semantic_run = None
         self._semantic_choices = []
+        self._resize_job = self._export_poll_job = None
+        self._layout_job=None
+        self._layout_initialized=False
+        self._map_popup = self._large_canvas = None
+        self._ph_map_large = None
+        self._map_span = 12.
+        self._map_centre = None
+        self._map_overview = True
+        self._grid_bounds = None
+        self._viewports = {}
+        self._export_pool = self._map_export_future = None
         self._build()
         self.protocol('WM_DELETE_WINDOW', self.close)
         self.update_idletasks()
@@ -862,6 +868,22 @@ class BagViewer(tk.Toplevel):
             check.pack(side='left', padx=4)
             self._controls.append(check)
         self._controls += [self.semantic_picker, load_semantic]
+
+        views = tk.Frame(self,bg=BG)
+        views.pack(fill='x',padx=12,pady=3)
+        for text,command in ((tr('均衡布局'),lambda:self.set_layout('balanced')),
+                             (tr('画面优先'),lambda:self.set_layout('rgb')),
+                             (tr('地图优先'),lambda:self.set_layout('map')),
+                             (tr('放大地图'),self.open_map_window),
+                             ('-',lambda:self.zoom_map(1.25)),('+',lambda:self.zoom_map(.8)),
+                             (tr('全图'),self.overview_map),(tr('跟随机器人'),self.follow_map),
+                             (tr('最终地图'),self.open_final_map),(tr('地图图库'),self.open_gallery),
+                             (tr('结果目录'),self.open_results)):
+            button=ttk.Button(views,text=text,command=command,width=3 if text in ('-','+') else 10)
+            button.pack(side='left',padx=2)
+            self._controls.append(button)
+        self.var_map_scale=tk.StringVar()
+        tk.Label(views,textvariable=self.var_map_scale,bg=BG,fg=DIM).pack(side='left',padx=5)
         self._set_controls(False)
 
         self.var_semantic_note = tk.StringVar()
@@ -883,24 +905,160 @@ class BagViewer(tk.Toplevel):
         self.loading_label = tk.Label(self.loading_frame, textvariable=self.var_loading,bg=BG,fg=DIM)
         self.loading_label.pack(side='left')
 
-        body = tk.Frame(self, bg=BG)
-        body.pack(fill='both', expand=True, padx=10, pady=8)
-
-        self.lbl_rgb = tk.Label(body, bg='#111', text=tr('彩色'), fg='#777')
-
-        right = tk.Frame(body, bg=BG, width=self._right_width)
-        right.pack(side='right', fill='y')
-        right.pack_propagate(False)
-        tk.Label(right, text=tr('深度（0~4 m，近白远黑）'), bg=BG, fg=DIM).pack(anchor='w')
-        # 别给 height：给字符行高会把图片裁掉，让图片自己撑
-        self.lbl_depth = tk.Label(right, bg='#111', text=tr('深度'), fg='#777')
-        self.lbl_depth.pack(pady=(2, 6))
-        self.lbl_scan_title = tk.Label(right, text=tr('正在加载全局视图'), bg=BG, fg=DIM)
+        self.body=ttk.Panedwindow(self,orient='horizontal')
+        self.body.pack(fill='both',expand=True,padx=10,pady=8)
+        self.body.bind('<Configure>',self._initial_layout)
+        rgb=tk.Frame(self.body,bg='#111',width=720,height=480);rgb.pack_propagate(False)
+        self.lbl_rgb=tk.Label(rgb,bg='#111',text=tr('彩色'),fg='#777',width=1,height=1)
+        self.lbl_rgb.pack(fill='both',expand=True)
+        self.right_split=ttk.Panedwindow(self.body,orient='vertical',width=440)
+        self.body.add(rgb,weight=3);self.body.add(self.right_split,weight=2)
+        depth=tk.Frame(self.right_split,bg=BG,width=440,height=200);depth.pack_propagate(False)
+        tk.Label(depth,text=tr('深度（0~4 m，近白远黑）'),bg=BG,fg=DIM).pack(anchor='w')
+        self.lbl_depth=tk.Label(depth,bg='#111',text=tr('深度'),fg='#777',width=1,height=1)
+        self.lbl_depth.pack(fill='both',expand=True)
+        mapping=tk.Frame(self.right_split,bg=BG,width=440,height=320);mapping.pack_propagate(False)
+        self.right_split.add(depth,weight=1);self.right_split.add(mapping,weight=2)
+        self.lbl_scan_title = tk.Label(mapping, text=tr('正在加载全局视图'), bg=BG, fg=DIM)
         self.lbl_scan_title.pack(anchor='w')
-        self.cv = tk.Canvas(right, width=self._right_width-20, height=self._canvas_height, bg='#0d1117',
+        self.cv = tk.Canvas(mapping, width=440, height=320, bg='#0d1117',
                             highlightthickness=0)
         self.cv.pack(fill='both', expand=True)
-        self.lbl_rgb.pack(side='left', fill='both', expand=True)
+        for widget in (self.lbl_rgb,self.lbl_depth,self.cv):
+            widget.bind('<Configure>',self._queue_redraw)
+        self._bind_map(self.cv)
+
+    def _initial_layout(self,event):
+        # An idle callback before mapping sees width=1 and collapses the RGB pane.
+        if not self._layout_initialized and event.width>300 and event.height>150:
+            self._layout_initialized=True
+            self._layout_job=self.after_idle(self._apply_initial_layout)
+
+    def _apply_initial_layout(self):
+        self._layout_job=None
+        self.set_layout('balanced')
+
+    def set_layout(self,mode):
+        if self._closing:return
+        self.update_idletasks()
+        ratio={'balanced':.6,'rgb':.78,'map':.32}[mode]
+        self.body.sashpos(0,int(self.body.winfo_width()*ratio))
+        self.update_idletasks()
+        self.right_split.sashpos(0,int(self.right_split.winfo_height()*(.24 if mode=='map' else .36)))
+        self._queue_redraw()
+
+    def _queue_redraw(self,_event=None):
+        if self._closing:return
+        if self._resize_job:self.after_cancel(self._resize_job)
+        self._resize_job=self.after(100,self._redraw_view)
+
+    @staticmethod
+    def _canvas_size(canvas):
+        return max(32,canvas.winfo_width()),max(32,canvas.winfo_height())
+
+    def _render_images(self):
+        from PIL import ImageTk
+        for image,label,attribute in ((self._export_rgb,self.lbl_rgb,'_ph_rgb'),
+                                      (self._export_depth,self.lbl_depth,'_ph_depth')):
+            if image is None:continue
+            size=self._canvas_size(label);box=self._fit(image,*size)
+            photo=getattr(self,attribute)
+            if photo is None or (photo.width(),photo.height())!=size:
+                photo=ImageTk.PhotoImage(box);setattr(self,attribute,photo)
+            else:photo.paste(box)
+            label.configure(image=photo,text='')
+
+    def _redraw_view(self):
+        if self._resize_job:self.after_cancel(self._resize_job)
+        self._resize_job=None
+        if self._closing:return
+        self._render_images()
+        d=self._last
+        if d.get('err'):return
+        if d.get('frame') in ('map','odom') and d.get('pose'):
+            self._map_ensure(d['pose']);self._draw_map_view(d['pose'],d.get('scan'))
+        elif d:self._draw_scan(d.get('scan'))
+
+    def _bind_map(self,canvas):
+        canvas.bind('<MouseWheel>',lambda e:self.zoom_map(.8 if e.delta>0 else 1.25,canvas))
+        canvas.bind('<Button-4>',lambda e:self.zoom_map(.8,canvas))
+        canvas.bind('<Button-5>',lambda e:self.zoom_map(1.25,canvas))
+        canvas.bind('<ButtonPress-1>',lambda e:self._start_map_drag(e,canvas))
+        canvas.bind('<B1-Motion>',self._drag_map)
+
+    def _start_map_drag(self,event,canvas):
+        view=self._viewports.get(canvas)
+        self._drag_origin=(event.x,event.y,view) if view else None
+
+    def _drag_map(self,event):
+        if not getattr(self,'_drag_origin',None):return
+        x,y,view=self._drag_origin
+        self._map_centre=(view.centre[0]-(event.x-x)/view.scale,view.centre[1]+(event.y-y)/view.scale)
+        self._map_span=view.span;self._map_overview=False
+        self._redraw_view()
+
+    def zoom_map(self,factor,canvas=None):
+        view=self._viewports.get(canvas or self.cv)
+        if view:self._map_centre=view.centre;self._map_span=view.span
+        self._map_span=max(.8,min(60.,self._map_span*factor));self._map_overview=False
+        self._redraw_view()
+
+    def overview_map(self):
+        self._map_overview=True;self._redraw_view()
+
+    def follow_map(self):
+        self._map_overview=False;self._map_centre=None;self._redraw_view()
+
+    def open_map_window(self):
+        if self._map_popup and self._map_popup.winfo_exists():
+            self._map_popup.lift();return
+        win=tk.Toplevel(self);self._map_popup=win;win.title(tr('大地图 · 可滚轮缩放、拖动平移'))
+        win.geometry('%dx%d+60+40'%(min(1200,self.winfo_screenwidth()-100),min(850,self.winfo_screenheight()-150)))
+        bar=tk.Frame(win);bar.pack(fill='x')
+        for text,command in (('+',lambda:self.zoom_map(.8,self._large_canvas)),('-',lambda:self.zoom_map(1.25,self._large_canvas)),
+                             (tr('全图'),self.overview_map),(tr('跟随机器人'),self.follow_map),(tr('最终地图'),self.open_final_map)):
+            ttk.Button(bar,text=text,command=command).pack(side='left',padx=3,pady=4)
+        self._large_canvas=tk.Canvas(win,bg='#0d1117',highlightthickness=0)
+        self._large_canvas.pack(fill='both',expand=True);self._large_canvas.bind('<Configure>',self._queue_redraw)
+        self._bind_map(self._large_canvas);win.protocol('WM_DELETE_WINDOW',self._close_map_window)
+        self._queue_redraw()
+
+    def _close_map_window(self):
+        if self._large_canvas:self._viewports.pop(self._large_canvas,None)
+        if self._map_popup:self._map_popup.destroy()
+        self._map_popup=self._large_canvas=self._ph_map_large=None
+
+    @staticmethod
+    def _open_path(path):
+        subprocess.Popen(['xdg-open',path],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
+    def open_results(self):
+        self._open_path(self._last.get('semantic_run') or self.folder)
+
+    def open_gallery(self):
+        path=os.path.join(HERE,'results','semantic_maps');os.makedirs(path,exist_ok=True)
+        self._open_path(path)
+
+    def open_final_map(self):
+        folder=self._last.get('semantic_run')
+        if not folder:
+            messagebox.showinfo(tr('最终地图'),tr('请先在语义回放中选择一个版本。'),parent=self);return
+        if self._map_export_future and not self._map_export_future.done():return
+        if self._playing:self.toggle_play()
+        if self._export_pool is None:self._export_pool=ThreadPoolExecutor(max_workers=1)
+        self.var_info.set(tr('正在导出完整语义地图…'))
+        self._map_export_future=self._export_pool.submit(export_final_map,folder,gallery=os.path.join(HERE,'results','semantic_maps'))
+        self._poll_final_map()
+
+    def _poll_final_map(self):
+        self._export_poll_job=None
+        if self._closing:return
+        if not self._map_export_future.done():
+            self._export_poll_job=self.after(80,self._poll_final_map);return
+        try:
+            path=self._map_export_future.result();self.var_info.set(tr('最终地图已保存：')+path);self._open_path(path)
+        except Exception as exc:
+            self.var_info.set(tr('最终地图导出失败：')+str(exc))
 
     def _set_controls(self, enabled):
         for widget in self._controls:
@@ -1071,8 +1229,14 @@ class BagViewer(tk.Toplevel):
         if context:
             self._update_context(context)
             self.seek(d['record_time']-self._record_t0)
+        semantic=d.get('semantic')
+        if (not context and not d.get('err') and d is not self._last and semantic and semantic.get('sample') is not None
+                and d.get('semantic_run')==self._last.get('semantic_run')
+                and d.get('frame')==self._last.get('frame')
+                and semantic.get('sample')==self._last.get('semantic',{}).get('sample')):
+            self._last=d  # Playback within one cached sample needs no image/font work.
+            return
         self._last = d
-        semantic = d.get('semantic')
         if semantic:
             self.var_semantic_note.set(tr('模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。'))
             if not semantic.get('sample'):
@@ -1092,18 +1256,11 @@ class BagViewer(tk.Toplevel):
             self._loading=False;self._load_error=False;self.spinner.stop()
             self.loading_frame.pack_forget()
         try:
-            from PIL import Image, ImageTk
+            from PIL import Image
             if d.get('rgb'):
                 self._export_rgb = Image.open(d['rgb']).convert('RGB')
                 if semantic and self.var_boxes.get():
                     self._export_rgb = draw_detections(self._export_rgb, semantic['detections'], self.var_other_classes.get())
-                box = self._fit(self._export_rgb.copy(), *self._rgb_size)
-                if self._ph_rgb is None:
-                    self._ph_rgb = ImageTk.PhotoImage(box)
-                    self.lbl_rgb.configure(image=self._ph_rgb, text='')
-                else:
-                    self._ph_rgb.paste(box)
-                    self.lbl_rgb.configure(image=self._ph_rgb, text='')
             else:
                 self._export_rgb = None
                 self.lbl_rgb.configure(image='', text=tr('当前时刻无彩色帧'))
@@ -1111,16 +1268,10 @@ class BagViewer(tk.Toplevel):
                 self._export_depth = Image.open(d['depth']).convert('RGB')
                 if semantic and self.var_boxes.get():
                     self._export_depth = draw_detections(self._export_depth, semantic['detections'], self.var_other_classes.get(), labels=False)
-                box = self._fit(self._export_depth.copy(), *self._depth_size)
-                if self._ph_depth is None:
-                    self._ph_depth = ImageTk.PhotoImage(box)
-                    self.lbl_depth.configure(image=self._ph_depth, text='')
-                else:
-                    self._ph_depth.paste(box)
-                    self.lbl_depth.configure(image=self._ph_depth, text='')
             else:
                 self._export_depth = None
                 self.lbl_depth.configure(image='', text=tr('当前时刻无深度帧'))
+            self._render_images()
         except Exception as e:
             self.var_info.set(tr('解码失败：%s') % e)
             return
@@ -1168,6 +1319,8 @@ class BagViewer(tk.Toplevel):
         self._map_img = None
         self._map_panel = None
         self._last_map_t = None
+        self._map_overview=True
+        self._viewports.clear()
         self.btn_frame.configure(text=tr('切到车体系') if self.world != 'base' else tr('切到全局视图'))
 
     @staticmethod
@@ -1175,7 +1328,8 @@ class BagViewer(tk.Toplevel):
         """缩放到固定尺寸并居中留边 —— 复用 PhotoImage 要求每帧尺寸一致。"""
         from PIL import Image
         im = im.convert('RGB')
-        im.thumbnail((w, h))
+        scale=min(float(w)/im.width,float(h)/im.height)
+        im=im.resize((max(1,int(im.width*scale)),max(1,int(im.height*scale))),Image.BILINEAR)
         box = Image.new('RGB', (w, h), (17, 17, 17))
         box.paste(im, ((w - im.width) // 2, (h - im.height) // 2))
         return box
@@ -1187,6 +1341,8 @@ class BagViewer(tk.Toplevel):
         if self._map_img is not None:
             return
         from PIL import Image, ImageDraw
+        self._grid_bounds=None
+        self._history_bounds=None
         side = int(self.MAP_HALF * 2 * self.MAP_PPM)
         self._map_img = Image.new('RGB', (side, side), (13, 17, 23))
         self._map_draw = ImageDraw.Draw(self._map_img)
@@ -1195,6 +1351,7 @@ class BagViewer(tk.Toplevel):
         if self.map_info and self.frame_mode == 'map':
             try:
                 source = Image.open(self.map_info['image']).convert('RGB')
+                self._grid_bounds=grid_bounds(self.map_info,source)
                 res = float(self.map_info['resolution'])
                 ox, oy, yaw = self.map_info['origin']
                 c, sn = math.cos(yaw), math.sin(yaw)
@@ -1229,74 +1386,62 @@ class BagViewer(tk.Toplevel):
             if 0 <= px < w and 0 <= py < h:
                 d.rectangle([px, py, px + 1, py + 1], fill=HISTORY_GREY)
         self._map_n += len(pts)
+        bounds=point_bounds(list(pts)+[(pose[0],pose[1])])
+        if self._history_bounds:
+            old=self._history_bounds;bounds=(min(old[0],bounds[0]),min(old[1],bounds[1]),max(old[2],bounds[2]),max(old[3],bounds[3]))
+        self._history_bounds=bounds
 
     def _draw_map_view(self, pose, current=None):
-        """以车为中心裁 12 m 见方，画车头三角形。
-
-        累积点云是"已经看过的"（灰），`current` 是这一帧的原始扫描（绿，带描边）
-        —— 后者画在最上层，拖时间轴时才分得清"现在看到什么"和"之前看到过什么"。
-        """
-        from PIL import Image, ImageDraw, ImageTk
-        span = 12.0
-        side = int(span * self.MAP_PPM)
-        px, py = self._w2p(pose[0], pose[1])
-        view = self._map_img.crop((int(px - side / 2), int(py - side / 2),
-                                   int(px + side / 2), int(py + side / 2)))
-        cw,ch=int(self.cv.cget('width')),int(self.cv.cget('height'))
-        pixels=min(cw,ch)
-        view = view.resize((pixels, pixels), Image.BILINEAR)
-        d = ImageDraw.Draw(view)
-        for x, y in (current or ()):
-            p = world_to_view(x, y, pose, span, pixels)
-            if p is not None:
-                vx, vy = p
-                d.rectangle([vx - 1, vy - 1, vx + 1, vy + 1], fill=CURRENT_GREEN)
-        semantic = self._last.get('semantic')
-        if semantic and self.var_points.get() and self.frame_mode == semantic['world']:
-            active = set(det['object_number'] for det in semantic['detections'] if det.get('object_number'))
-            for obj in semantic['objects']:
-                p = world_to_view(obj['x'], obj['y'], pose, span, pixels)
-                if p is None:
-                    continue
-                x, y = p
-                color = COLORS['fused'] if obj['number'] in active else COLORS['depth']
-                d.ellipse((x-4, y-4, x+4, y+4), fill=color, outline=(10, 20, 30))
-                text = '#%d %s' % (obj['number'], obj['label'])
-                width, height = label_size(d, text)
-                tx = min(max(0, x+5), max(0, pixels-width))
-                ty = max(0, min(pixels-height, y-height))
-                d.rectangle((tx, ty, tx+width, ty+height), fill=(13, 17, 23))
-                d.text((tx+2, ty), text, fill=color)
-        a = math.radians(pose[2])
-        ca, sa = math.cos(a), math.sin(a)
-        L, cx, cy = 14, pixels/2., pixels/2.
-        d.polygon([(cx + L * ca, cy - L * sa),
-                   (cx - L * 0.6 * ca + L * 0.45 * sa,
-                    cy + L * 0.6 * sa + L * 0.45 * ca),
-                   (cx - L * 0.6 * ca - L * 0.45 * sa,
-                    cy + L * 0.6 * sa - L * 0.45 * ca)],
-                  fill=(245, 158, 11), outline=(180, 83, 9))
-
-        box = Image.new('RGB', (cw,ch), (13, 17, 23))
-        box.paste(view, ((cw-pixels)//2,(ch-pixels)//2))
-        self._map_panel = box.copy()
-        self.cv.delete('all')
-        if self._ph_map is None:
-            self._ph_map = ImageTk.PhotoImage(box)
-        else:
-            self._ph_map.paste(box)
-        self.cv.create_image(0, 0, anchor='nw', image=self._ph_map)
+        from PIL import Image,ImageDraw,ImageTk
+        semantic=self._last.get('semantic')
+        bounds=semantic.get('bounds') if semantic else None
+        if not bounds:
+            points=[(o['x'],o['y']) for o in semantic['objects']] if semantic else []
+            bounds=point_bounds(points+[(pose[0],pose[1])]) if points else (self._grid_bounds or self._history_bounds or (pose[0]-5,pose[1]-5,pose[0]+5,pose[1]+5))
+        for canvas,attribute in ((self.cv,'_ph_map'),(self._large_canvas,'_ph_map_large')):
+            if canvas is None:continue
+            cw,ch=self._canvas_size(canvas)
+            view=(Viewport.fit(bounds,cw,ch) if self._map_overview else
+                  Viewport(self._map_centre or pose[:2],self._map_span,cw,ch))
+            self._viewports[canvas]=view
+            k=self.MAP_PPM/view.scale
+            affine=(k,0,(view.left-self._map_ox)*self.MAP_PPM,
+                    0,k,self._map_img.height-(view.top-self._map_oy)*self.MAP_PPM)
+            image=self._map_img.transform((cw,ch),Image.AFFINE,affine,resample=Image.BILINEAR)
+            draw=ImageDraw.Draw(image)
+            for x,y in current or ():
+                p=view.pixel(x,y)
+                if p:draw.rectangle((p[0]-1,p[1]-1,p[0]+1,p[1]+1),fill=CURRENT_GREEN)
+            if semantic and self.var_points.get() and self.frame_mode==semantic['world']:
+                active=set(d['object_number'] for d in semantic['detections'] if d.get('object_number'))
+                draw_objects(image,view,semantic['objects'],active,size=max(11,min(20,int(min(cw,ch)/40))))
+            p=view.pixel(pose[0],pose[1])
+            if p:
+                a=math.radians(pose[2]);ca,sa=math.cos(a),math.sin(a);x,y=p;length=14
+                draw.polygon(((x+length*ca,y-length*sa),
+                              (x-length*.6*ca+length*.45*sa,y+length*.6*sa+length*.45*ca),
+                              (x-length*.6*ca-length*.45*sa,y+length*.6*sa-length*.45*ca)),fill=(245,158,11),outline=(180,83,9))
+            photo=getattr(self,attribute)
+            if photo is None or (photo.width(),photo.height())!=(cw,ch):
+                photo=ImageTk.PhotoImage(image);setattr(self,attribute,photo)
+            else:photo.paste(image)
+            canvas.delete('all');canvas.create_image(0,0,anchor='nw',image=photo)
+            if canvas==self.cv:
+                self._map_panel=image.copy();self.var_map_scale.set(tr('范围 %.1f m')%view.span)
 
     def _draw_scan(self, pts):
+        self._draw_scan_canvas(pts,self.cv)
+        if self._large_canvas:self._draw_scan_canvas(pts,self._large_canvas)
+
+    def _draw_scan_canvas(self, pts, canvas):
         """雷达俯视图：车在中心、车头朝上，2/4/6 m 距离环。"""
-        self.cv.delete('all')
-        w = int(self.cv.cget('width'))
-        h = int(self.cv.cget('height'))
+        canvas.delete('all')
+        w,h=self._canvas_size(canvas)
         cx, cy = w / 2.0, h / 2.0
         scale = min(w, h) / 2.0 / 6.0        # 6 m 铺满
 
         for r in (2, 4, 6):
-            self.cv.create_oval(cx - r * scale, cy - r * scale,
+            canvas.create_oval(cx - r * scale, cy - r * scale,
                                 cx + r * scale, cy + r * scale,
                                 outline='#1b2534')
 
@@ -1304,14 +1449,14 @@ class BagViewer(tk.Toplevel):
             for x, y in pts:
                 px = cx + x * scale
                 py = cy - y * scale
-                self.cv.create_rectangle(px, py, px + 2, py + 2,
+                canvas.create_rectangle(px, py, px + 2, py + 2,
                                          outline='', fill='#4ade80')
         else:
-            self.cv.create_text(cx, cy + 26, text=tr('无雷达数据'), fill='#555')
+            canvas.create_text(cx, cy + 26, text=tr('无雷达数据'), fill='#555')
 
         # 只画一个三角形：点已经按 /tf 转到车体系，屏幕上方就是车头，
         # 再加箭头反而多余。
-        self.cv.create_polygon(cx, cy - 9, cx - 8, cy + 8, cx + 8, cy + 8,
+        canvas.create_polygon(cx, cy - 9, cx - 8, cy + 8, cx + 8, cy + 8,
                                fill='#f59e0b', outline='#b45309')
 
     def export_combo(self):
@@ -1392,7 +1537,9 @@ class BagViewer(tk.Toplevel):
     def close(self):
         self._closing = True
         self.spinner.stop()
-        for job in (self._load_job,self._drain_job,self._play_job):
+        self._close_map_window()
+        if self._export_pool:self._export_pool.shutdown(wait=False)
+        for job in (self._load_job,self._drain_job,self._play_job,self._resize_job,self._export_poll_job,self._layout_job):
             if job:
                 try:self.after_cancel(job)
                 except tk.TclError:pass

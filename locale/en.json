@@ -385,5 +385,20 @@
   "此处没有临近语义采样帧；拖动时间轴查看其他位置。": "No nearby semantic sample here. Seek to another time.",
   "紫色深度：无效测距": "Purple depth: invalid range",
   "%s · 采样回放帧 %s": "%s | sampled replay frame %s",
-  "模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。": "Prediction boxes: green=fused, blue=depth pending, orange=insufficient depth, grey=excluded. Map: green=current matches, blue=other candidates. Full-session fusion; surface points, not object centres."
+  "模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。": "Prediction boxes: green=fused, blue=depth pending, orange=insufficient depth, grey=excluded. Map: green=current matches, blue=other candidates. Full-session fusion; surface points, not object centres.",
+  "均衡布局": "Balanced",
+  "画面优先": "RGB focus",
+  "地图优先": "Map focus",
+  "放大地图": "Large map",
+  "全图": "Overview",
+  "跟随机器人": "Follow robot",
+  "最终地图": "Final map",
+  "结果目录": "Results",
+  "大地图 · 可滚轮缩放、拖动平移": "Large map | wheel to zoom, drag to pan",
+  "请先在语义回放中选择一个版本。": "Select a semantic replay version first.",
+  "正在导出完整语义地图…": "Exporting the full-session semantic map...",
+  "最终地图已保存：": "Final map saved: ",
+  "最终地图导出失败：": "Could not export final map: ",
+  "范围 %.1f m": "Width %.1f m",
+  "地图图库": "Map gallery"
 }

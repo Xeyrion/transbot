@@ -104,8 +104,12 @@ class SemanticReplay(object):
                 det['depth_m'] = obs[oid]['dist']
             self.detections.setdefault(det['source_frame'], []).append(det)
         self.samples = []
+        trajectory=[]
         for path in sorted(glob.glob(os.path.join(self.folder, '[0-9]*', 'meta.json'))):
             meta = read_json(path)
+            matrix=meta.get('t_world_optical',meta.get('t_map_cam'))
+            if matrix and meta.get('world_frame')==self.world:
+                trajectory.append((matrix[0][3],matrix[1][3]))
             if meta.get('bag') != os.path.basename(bag_path):
                 continue
             if meta.get('world_frame') != self.world:
@@ -120,6 +124,8 @@ class SemanticReplay(object):
         self.times = [s['record'] for s in self.samples]
         if not self.samples:
             raise ValueError('No semantic samples for this bag part')
+        points=trajectory+[(o['x'],o['y']) for o in self.objects]
+        self.bounds=([min(p[0] for p in points),min(p[1] for p in points),max(p[0] for p in points),max(p[1] for p in points)] if points else None)
 
     def nearest(self, record, max_age=.65):
         i = bisect.bisect_left(self.times, record)
@@ -130,7 +136,7 @@ class SemanticReplay(object):
     def payload(self, sample):
         return dict(model=self.model, run_id=self.run.get('run_id',os.path.basename(self.folder)), sample=sample['id'] if sample else None,
                     detections=self.detections.get(sample['id'], []) if sample else [],
-                    objects=self.objects, world=self.world)
+                    objects=self.objects, world=self.world,bounds=self.bounds)
 
 
 def label_size(draw, text):
