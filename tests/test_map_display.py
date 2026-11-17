@@ -7,7 +7,7 @@ import unittest
 from PIL import Image
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from map_display import Viewport,raster_view,grid_bounds,export_final_map
+from map_display import Viewport,raster_view,grid_bounds,export_final_map,gallery_image_path
 
 
 class MapDisplayTests(unittest.TestCase):
@@ -36,7 +36,8 @@ class MapDisplayTests(unittest.TestCase):
     def test_standalone_export_uses_all_saved_poses_and_preserves_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
-            run=dict(state='complete',run_id='test_run',world_frame='odom',geometry={})
+            run=dict(state='complete',run_id='test_run',world_frame='odom',geometry={},
+                     sources=[dict(path='/bags/session_20261117_071239/cam_20261117_071320_0.bag')])
             objects=dict(world_frame='odom',geometry={},objects=[dict(label='chair',x=2.,y=1.,z=.5)])
             (root/'run.json').write_text(json.dumps(run));(root/'objects.json').write_text(json.dumps(objects))
             for index,x in enumerate([-3.,4.]):
@@ -49,7 +50,8 @@ class MapDisplayTests(unittest.TestCase):
             with Image.open(path) as image:self.assertEqual(image.size,(2400,1600))
             self.assertEqual((root/'objects.json').read_bytes(),before)
             self.assertEqual(Path(path).name,'final_semantic_map.png')
-            self.assertEqual((gallery/'test_run.png').read_bytes(),Path(path).read_bytes())
+            self.assertEqual((gallery/'session_20261117_071239__cam_20261117_071320'/'test_run.png').read_bytes(),
+                             Path(path).read_bytes())
             objects['world_frame']='map';(root/'objects.json').write_text(json.dumps(objects))
             with self.assertRaisesRegex(ValueError,'coordinate frames differ'):export_final_map(str(root))
 
@@ -59,6 +61,15 @@ class MapDisplayTests(unittest.TestCase):
         box=BagViewer._fit(image,200,200)
         self.assertEqual(box.getpixel((10,60)),(255,0,0))
         self.assertEqual(box.getpixel((10,10)),(17,17,17))
+
+    def test_gallery_keeps_split_parts_together_and_separate_recordings_apart(self):
+        def target(source):
+            return Path(gallery_image_path(dict(run_id='same_model', sources=[dict(path=source)]), 'unused'))
+        first = target('/bags/session_20261117_071239/cam_20261117_071320_0.bag')
+        self.assertEqual(first, target(r'D:\bags\session_20261117_071239\cam_20261117_071320_1.bag'))
+        self.assertNotEqual(first.parent, target('/bags/session_20261118_080000/cam_20261118_080112_0.bag').parent)
+        self.assertNotEqual(target('/archive/entry.bag').parent, target('/archive/lab.bag').parent)
+        self.assertNotEqual(first.parent, target('/bags/session_20261117_071239/cam_20261117_075559_0.bag').parent)
 
     def test_export_refuses_a_modified_map_background(self):
         with tempfile.TemporaryDirectory() as tmp:

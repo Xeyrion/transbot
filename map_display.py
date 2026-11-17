@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 from PIL import Image, ImageDraw, ImageFont
+from session_catalog import STAMP_PREFIX, session_label
 
 
 class Viewport:
@@ -97,6 +98,24 @@ def gallery_filename(run,folder):
     return (re.sub('[^A-Za-z0-9_-]+','_',name).strip('_') or 'semantic_map')+'.png'
 
 
+def gallery_recording(source_path):
+    """Directory key for one recording, including legacy bags in shared folders."""
+    parent, filename = os.path.split(source_path.replace('\\', '/'))
+    stem = os.path.splitext(filename)[0]
+    stem = re.sub(r'(_\d{8}_\d{6})_\d+$', r'\1', stem)
+    recording = session_label(stem, limit=100) or 'recording'
+    session = os.path.basename(parent)
+    if STAMP_PREFIX.match(session):
+        return session_label(session, limit=100) + '__' + recording
+    return recording
+
+
+def gallery_image_path(run, folder):
+    sources = run.get('sources', [])
+    recording = gallery_recording(sources[0]['path']) if sources else 'unassigned'
+    return os.path.join(recording, gallery_filename(run, folder))
+
+
 def export_final_map(folder,destination=None,size=(2400,1600),gallery=None):
     """Uses saved run geometry, objects and sample poses; no ROS/model/bag required."""
     folder=os.path.abspath(folder)
@@ -152,6 +171,7 @@ def export_final_map(folder,destination=None,size=(2400,1600),gallery=None):
     destination=destination or os.path.join(folder,'final_semantic_map.png')
     result.save(destination+'.tmp',format='PNG');os.replace(destination+'.tmp',destination)
     if gallery:
-        os.makedirs(gallery,exist_ok=True)
-        shutil.copy2(destination,os.path.join(gallery,gallery_filename(run,folder)))
+        gallery_image = os.path.join(gallery, gallery_image_path(run, folder))
+        os.makedirs(os.path.dirname(gallery_image), exist_ok=True)
+        shutil.copy2(destination, gallery_image)
     return os.path.abspath(destination)

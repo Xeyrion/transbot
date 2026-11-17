@@ -137,6 +137,9 @@ while True:
         v._close_map_window()
         with patch.object(v,'_open_path') as opened:
             v.open_results();opened.assert_called_once_with('/semantic/test')
+        with patch.object(self.gui,'HERE',str(self.folder)),patch.object(v,'_open_path') as opened:
+            v.open_gallery()
+            opened.assert_called_once_with(str(self.folder/'results'/'semantic_maps'/'unused'))
         def export_saved(folder,**kwargs):
             self.assertEqual(folder,'/semantic/test');time.sleep(.15)
             return str(self.folder/'final_semantic_map.png')

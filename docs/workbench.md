@@ -27,9 +27,9 @@ RGB 显示类别、置信度、有效深度和对应地图候选编号。框的�
 
 阅读器左右、右侧上下的分隔栏均可拖动；RGB 和深度图按实际面板大小等比例缩放，也允许放大小图。“画面优先”“地图优先”“均衡布局”可快速切换比例。地图使用整个画布，支持滚轮/加减号缩放、左键拖动平移；“全图”显示完整会话范围，“跟随机器人”恢复跟随。“放大地图”打开独立、可最大化的实时地图窗口。
 
-选择语义版本后，“最终地图”在后台生成并打开 2400×1600 的完整会话 PNG，不依赖当前播放进度。文件保存在对应运行目录的 `final_semantic_map.png`，同时复制到项目 `results/semantic_maps/<运行名>.png`。编号与该运行的阅读器一致；灰线为相机采样轨迹，点仍是全会话可见表面候选。里程计结果标明 ODOM，不绘制占用地图背景。
+选择语义版本后，“最终地图”在后台生成并打开 2400×1600 的完整会话 PNG，不依赖当前播放进度。文件保存在对应运行目录的 `final_semantic_map.png`，同时复制到项目 `results/semantic_maps/<会话目录>__<bag 主干>/<运行名>.png`。编号与该运行的阅读器一致；灰线为相机采样轨迹，点仍是全会话可见表面候选。里程计结果标明 ODOM，不绘制占用地图背景。
 
-“地图图库”直接打开 `~/robot_research/bagtools/results/semantic_maps`，其中本轮有 12 张图和索引说明；“结果目录”打开当前语义运行目录。旧版 `semantic_map.png` 是原来的小尺寸预览图，新展示入口使用 `final_semantic_map.png`。Windows 工作区另有相同的 `bagtools/results/semantic_maps` 图片副本，可直接打开、缩放和分享。
+“地图图库”打开当前录制的子目录。上一级 `~/robot_research/bagtools/results/semantic_maps` 按录制分目录，根目录的 `README.md` 列出各录制的来源分卷和展示图。历史散包使用 bag 主干作为子目录名；“结果目录”打开当前语义运行目录。旧版 `semantic_map.png` 是原来的小尺寸预览图，新展示入口使用 `final_semantic_map.png`。Windows 工作区另有相同的 `bagtools/results/semantic_maps` 图片副本，可直接打开、缩放和分享。
 
 批量重新导出：`python3 semantic/export_maps.py`。地图 PNG 可脱离 bag、机器人和模型查看。更新界面后请重新打开整个“数据阅读”窗口。
 

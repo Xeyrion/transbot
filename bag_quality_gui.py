@@ -28,7 +28,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from session_catalog import sessions, bag_names, rename_target
 from semantic_replay import draw_detections, COLORS
-from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_final_map
+from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_final_map, gallery_recording
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 
 import tkinter as tk
@@ -1036,7 +1036,19 @@ class BagViewer(tk.Toplevel):
         self._open_path(self._last.get('semantic_run') or self.folder)
 
     def open_gallery(self):
-        path=os.path.join(HERE,'results','semantic_maps');os.makedirs(path,exist_ok=True)
+        gallery = os.path.join(HERE, 'results', 'semantic_maps')
+        source = os.path.join(self.folder, self.bag)
+        run_folder = self._last.get('semantic_run')
+        if run_folder:
+            try:
+                with open(os.path.join(run_folder, 'run.json')) as f:
+                    sources = json.load(f).get('sources', [])
+            except (OSError, ValueError):
+                sources = []
+            if sources:
+                source = sources[0]['path']
+        path = os.path.join(gallery, gallery_recording(source))
+        os.makedirs(path, exist_ok=True)
         self._open_path(path)
 
     def open_final_map(self):
