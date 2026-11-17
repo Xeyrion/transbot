@@ -372,5 +372,18 @@
   "录制时发生跳时，数据已保留": "Clock jump during recording; data preserved",
   "启动请求已提交，正在准备数据源": "Startup request accepted; preparing data sources",
   "录制或收尾期间不能校时和恢复驱动": "Time sync and driver recovery are unavailable during recording or finalization",
-  "录前准备": "Preparation"
+  "录前准备": "Preparation",
+  "语义回放": "Semantic replay",
+  "原始数据": "Raw data",
+  "加载语义结果…": "Load semantic run...",
+  "识别框": "Boxes",
+  "物品点": "Objects",
+  "全部类别": "All classes",
+  "正在加载语义结果…": "Loading semantic result...",
+  "选择包含 run.json 的语义结果文件夹": "Select a semantic result folder containing run.json",
+  "语义结果加载失败：": "Could not load semantic result: ",
+  "此处没有临近语义采样帧；拖动时间轴查看其他位置。": "No nearby semantic sample here. Seek to another time.",
+  "紫色深度：无效测距": "Purple depth: invalid range",
+  "%s · 采样回放帧 %s": "%s | sampled replay frame %s",
+  "模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。": "Prediction boxes: green=fused, blue=depth pending, orange=insufficient depth, grey=excluded. Map: green=current matches, blue=other candidates. Full-session fusion; surface points, not object centres."
 }

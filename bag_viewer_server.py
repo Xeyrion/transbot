@@ -26,6 +26,7 @@ import shutil
 import tempfile
 import hashlib
 from viewer_core import TransformIndex, session_files, association, transform_xy, mapped_window
+from semantic_replay import SemanticReplay, discover_runs
 
 import numpy as np
 import rosbag
@@ -155,26 +156,8 @@ def write_pgm(path, arr):
         f.write(arr.tobytes())
 
 
-def main():
-    global OUT
-    OUT = tempfile.mkdtemp(prefix='bagview-')
-    path = sys.argv[1]
-    if not os.path.isdir(OUT):
-        os.makedirs(OUT)
-    bag = rosbag.Bag(path, 'r')
-    t0, t1 = bag.get_start_time(), bag.get_end_time()
-
-    warning = None
-    try:
-        linked = association(path)
-        if linked and not os.path.isfile(linked['yaml']):
-            raise ValueError(tr('关联地图文件缺失'))
-        # 录制时存下的栅格没有单独的轨迹包，轨迹就在源包里
-        if linked and linked.get('trajectory') and not os.path.isfile(linked['trajectory']):
-            raise ValueError(tr('关联轨迹文件缺失'))
-    except Exception as exc:
-        warning = str(exc)
-        linked = None
+def reader_context(path, start, end, linked, warning=None):
+    t0, t1 = start, end
     map_note=None
     replaces_map=not linked or bool(linked.get('replace_map_odom'))
     bounds=linked.get('record_bounds') if linked and replaces_map else None
@@ -212,9 +195,42 @@ def main():
             beside = os.path.join(os.path.dirname(linked['yaml']), os.path.basename(image))
             if os.path.isfile(beside):
                 map_info['image'] = beside
-    if not send({'dur': t1 - t0, 't0': t0, 'bag': os.path.basename(path),
-                 'laser_yaw': round(yaw_deg, 1), 'has_map': has_map, 'world': world,
-                 'map_info': map_info, 'warning': warning, 'map_note':map_note, 'tf_cache_hit': poses.cache_hit}):
+    info = {'dur': t1 - t0, 't0': t0, 'bag': os.path.basename(path),
+            'laser_yaw': round(yaw_deg, 1), 'has_map': has_map, 'world': world,
+            'map_info': map_info, 'warning': warning, 'map_note': map_note,
+            'tf_cache_hit': poses.cache_hit}
+    return dict(info=info, poses=poses, t0=t0, t1=t1, world=world)
+
+
+def main():
+    global OUT
+    OUT = tempfile.mkdtemp(prefix='bagview-')
+    path = sys.argv[1]
+    if not os.path.isdir(OUT):
+        os.makedirs(OUT)
+    bag = rosbag.Bag(path, 'r')
+    t0, t1 = bag.get_start_time(), bag.get_end_time()
+
+    warning = None
+    try:
+        linked = association(path)
+        if linked and not os.path.isfile(linked['yaml']):
+            raise ValueError(tr('关联地图文件缺失'))
+        # 录制时存下的栅格没有单独的轨迹包，轨迹就在源包里
+        if linked and linked.get('trajectory') and not os.path.isfile(linked['trajectory']):
+            raise ValueError(tr('关联轨迹文件缺失'))
+    except Exception as exc:
+        warning = str(exc)
+        linked = None
+    raw_context = reader_context(path, t0, t1, linked, warning)
+    context = raw_context
+    semantic = None
+    semantic_path = None
+    contexts = {None: (context, None)}
+    last_semantic_key = last_semantic_out = None
+    info = dict(context['info'])
+    info['semantic_runs'] = discover_runs(path, os.path.join(os.path.dirname(__file__), 'results', 'semantic'))
+    if not send(info):
         bag.close()
         return
 
@@ -234,46 +250,98 @@ def main():
         if req.get('cmd') == 'close':
             break
 
-        t = float(req.get('t', 0.0))
-        t = max(t0, min(t1 - 0.05, t0 + t))
-        frame = req.get('frame', world)
+        changed = False
+        requested_path = os.path.abspath(req['semantic_run']) if req.get('semantic_run') else None
+        if requested_path != semantic_path:
+            try:
+                if requested_path not in contexts:
+                    candidate = SemanticReplay(requested_path, path)
+                    candidate_context = reader_context(path, bag.get_start_time(), bag.get_end_time(), candidate.linked)
+                    if candidate_context['world'] != candidate.world:
+                        raise ValueError('Semantic world frame is unavailable in its recorded trajectory')
+                    contexts[requested_path] = (candidate_context, candidate)
+                context, semantic = contexts[requested_path]
+                semantic_path = requested_path
+                changed = True
+            except Exception as exc:
+                if not send(dict(err='Semantic result: '+str(exc), semantic_error=True,
+                                 semantic_run=semantic_path)):
+                    break
+                continue
+        t0, t1, poses, world = (context[k] for k in ('t0', 't1', 'poses', 'world'))
+        t = float(req.get('record_time', t0+float(req.get('t', 0.0))))
+        t = max(t0, min(t1, t))
+        sample = semantic.nearest(t) if semantic else None
+        if sample:
+            t = sample['record']
+        frame = world if changed else req.get('frame', world)
         frame = frame if frame in ('map', 'odom', 'base') else world
+        sample_key = (semantic_path, sample['id'], frame) if sample else None
+        if sample_key and not changed and sample_key == last_semantic_key:
+            if not send(last_semantic_out):
+                break
+            continue
         want_map = frame != 'base'
-        out = {'t': round(t-t0, 3), 'err': None, 'frame': frame, 'stamps': {}}
+        out = {'t': round(t-t0, 3), 'record_time': t, 'err': None, 'frame': frame,
+               'stamps': {}, 'semantic_run': semantic_path}
+        if changed:
+            out['context'] = context['info']
+        if semantic:
+            out['semantic'] = semantic.payload(sample)
 
         try:
-            msg = first_in(bag, '/camera/rgb/image_raw', t)
-            if msg is not None and msg.encoding in ('bgr8', 'rgb8'):
-                rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
-                arr = rows[:, :msg.width*3].reshape(msg.height, msg.width, 3)
-                p = os.path.join(OUT, 'rgb.ppm')
-                write_ppm(p, arr)
-                out['rgb'] = p
-                out['rgb_t'] = round(msg.header.stamp.to_sec() - t0, 3)
+            if semantic:
+                out['rgb'] = out['depth'] = None
+                if sample:
+                    meta = sample['meta']
+                    out['rgb'] = os.path.join(sample['folder'], 'rgb.png')
+                    out['stamps']['rgb'] = meta['stamp']-t0
+                    out['stamps']['depth'] = meta['depth_stamp']-t0
+                    key = hashlib.sha1(semantic_path.encode('utf-8')).hexdigest()[:12]
+                    out['depth'] = os.path.join(OUT, 'depth_%s_%s.png' % (key, sample['id']))
+                    if not os.path.isfile(out['depth']):
+                        from PIL import Image
+                        depth = np.load(os.path.join(sample['folder'], 'depth.npy'), allow_pickle=False)
+                        valid = np.isfinite(depth) & (depth > 0)
+                        grey = (255*(1-np.clip(np.nan_to_num(depth)/4., 0, 1))).astype(np.uint8)
+                        rgb = np.repeat(grey[:, :, None], 3, axis=2)
+                        rgb[~valid] = (90, 35, 100)  # Invalid depth, not a close surface.
+                        Image.fromarray(rgb).save(out['depth'])
             else:
-                out['rgb'] = None
-
-            if msg is not None:
-                out['stamps']['rgb'] = round(msg.header.stamp.to_sec()-t0, 3)
-            msg = first_in(bag, '/camera/depth/image_raw', t)
-            if msg is not None:
-                out['stamps']['depth'] = round(msg.header.stamp.to_sec()-t0, 3)
-                if msg.encoding.startswith('32F'):
-                    dtype = np.dtype('>f4' if msg.is_bigendian else '<f4')
+                msg = first_in(bag, '/camera/rgb/image_raw', t)
+                if msg is not None and msg.encoding in ('bgr8', 'rgb8'):
                     rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
-                    d = rows[:, :msg.width*4].copy().view(dtype).reshape(msg.height, msg.width)
-                    d = np.nan_to_num(d)
-                    v = np.clip(d / 4.0, 0, 1)
+                    arr = rows[:, :msg.width*3].reshape(msg.height, msg.width, 3)
+                    if msg.encoding == 'bgr8':
+                        arr = arr[:, :, ::-1]
+                    p = os.path.join(OUT, 'rgb.ppm')
+                    write_ppm(p, arr)
+                    out['rgb'] = p
+                    out['rgb_t'] = round(msg.header.stamp.to_sec() - t0, 3)
                 else:
-                    dtype = np.dtype('>u2' if msg.is_bigendian else '<u2')
-                    rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
-                    d = rows[:, :msg.width*2].copy().view(dtype).reshape(msg.height, msg.width)
-                    v = np.clip(d.astype(np.float32) / 4000.0, 0, 1)
-                p = os.path.join(OUT, 'depth.pgm')
-                write_pgm(p, (255 * (1 - v)).astype(np.uint8))
-                out['depth'] = p
-            else:
-                out['depth'] = None
+                    out['rgb'] = None
+
+                if msg is not None:
+                    out['stamps']['rgb'] = round(msg.header.stamp.to_sec()-t0, 3)
+                msg = first_in(bag, '/camera/depth/image_raw', t)
+                if msg is not None:
+                    out['stamps']['depth'] = round(msg.header.stamp.to_sec()-t0, 3)
+                    if msg.encoding.startswith('32F'):
+                        dtype = np.dtype('>f4' if msg.is_bigendian else '<f4')
+                        rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
+                        d = rows[:, :msg.width*4].copy().view(dtype).reshape(msg.height, msg.width)
+                        d = np.nan_to_num(d)
+                        v = np.clip(d / 4.0, 0, 1)
+                    else:
+                        dtype = np.dtype('>u2' if msg.is_bigendian else '<u2')
+                        rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
+                        d = rows[:, :msg.width*2].copy().view(dtype).reshape(msg.height, msg.width)
+                        v = np.clip(d.astype(np.float32) / 4000.0, 0, 1)
+                    p = os.path.join(OUT, 'depth.pgm')
+                    write_pgm(p, (255 * (1 - v)).astype(np.uint8))
+                    out['depth'] = p
+                else:
+                    out['depth'] = None
 
             msg = first_in(bag, '/scan', t)
             out['scan'] = None
@@ -305,6 +373,8 @@ def main():
         except Exception as e:
             out['err'] = str(e)[:160]
 
+        last_semantic_key = sample_key if not out.get('err') else None
+        last_semantic_out = dict((k,v) for k,v in out.items() if k != 'context')
         if not send(out):
             break
 

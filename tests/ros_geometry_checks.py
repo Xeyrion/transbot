@@ -46,6 +46,8 @@ try:
                 (ef.DEPTH,'depth_optical',stamp+.005,'16UC1',np.full((8,12),2000,dtype='<u2').tostring(),24)]:
                 msg=Image(); msg.header.seq=n; msg.header.frame_id=frame; msg.header.stamp=rospy.Time.from_sec(s)
                 msg.width=12; msg.height=8; msg.encoding=encoding; msg.step=step; msg.data=data
+                if topic==ef.RGB and n==2:
+                    msg.encoding='bgr8';msg.data=np.tile(np.array([10,20,30],dtype=np.uint8),(8,12,1)).tostring()
                 bag.write(topic,msg,rospy.Time.from_sec(s+.002))
     # Fresh sessions without any map association must still preview RGB/depth.
     reader=subprocess.Popen(['python2',os.path.join(ROOT,'bag_viewer_server.py'),path],
@@ -53,9 +55,10 @@ try:
     try:
         metadata=json.loads(reader.stdout.readline())
         assert metadata['world']=='odom' and metadata['map_info'] is None,metadata
-        reader.stdin.write(json.dumps(dict(t=.25,frame='base'))+'\n');reader.stdin.flush()
+        reader.stdin.write(json.dumps(dict(t=.35,frame='base'))+'\n');reader.stdin.flush()
         frame=json.loads(reader.stdout.readline())
         assert frame['err'] is None and os.path.isfile(frame['rgb']) and os.path.isfile(frame['depth']),frame
+        assert PillowImage.open(frame['rgb']).getpixel((0,0))==(30,20,10)
         reader.stdin.write('{"cmd":"close"}\n');reader.stdin.flush()
         assert reader.wait()==0
     finally:
@@ -72,6 +75,42 @@ try:
     assert meta['frame']=='color_optical' and meta['source_depth_frame']=='depth_optical'
     d=np.load(os.path.join(out,'0000','depth.npy'))
     assert d.shape==(8,12) and d[4,6]==2. and d[4,0]==0.
+    # Replay must use the detector's exact sampled pixels and aligned depth,
+    # preserve geometry context, survive invalid selections, and return to raw.
+    def save_json(name, data):
+        with open(os.path.join(out,name),'w') as f:json.dump(data,f)
+    geometry=sampling['geometry']
+    base=dict(world_frame='odom',geometry=geometry)
+    save_json('run.json',dict(base,state='complete',sources=[dict(path=path,size=os.path.getsize(path),mtime=os.path.getmtime(path))]))
+    save_json('observations.json',dict(base,observations=[],detections=[dict(label='chair',score=.8,
+        source_frame='0000',bbox_xywh=[1,1,3,3],projection='rejected')]))
+    save_json('objects.json',dict(base,objects=[]))
+    # Distinct sample colour proves this isn't a neighbouring raw RGB image.
+    PillowImage.new('RGB',(12,8),(10,20,30)).save(os.path.join(out,'0000','rgb.png'))
+    reader=subprocess.Popen(['python2',os.path.join(ROOT,'bag_viewer_server.py'),path],
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    try:
+        metadata=json.loads(reader.stdout.readline())
+        def request(data):
+            reader.stdin.write(json.dumps(data)+'\n');reader.stdin.flush()
+            return json.loads(reader.stdout.readline())
+        frame=request(dict(record_time=meta['rgb_record']+.01,semantic_run=out))
+        assert frame['err'] is None and frame['semantic']['sample']=='0000',frame
+        assert frame['record_time']==meta['rgb_record'] and frame['context']['world']=='odom'
+        assert PillowImage.open(frame['rgb']).getpixel((0,0))==(10,20,30)
+        assert PillowImage.open(frame['depth']).getpixel((0,4))==(90,35,100)
+        assert frame['semantic']['detections'][0]['status']=='rejected'
+        repeat=request(dict(record_time=meta['rgb_record']+.02,semantic_run=out))
+        assert 'context' not in repeat and repeat['record_time']==frame['record_time']
+        failed=request(dict(semantic_run=os.path.join(scratch,'missing')))
+        assert failed['semantic_error'] and failed['semantic_run']==out
+        raw=request(dict(t=.15,semantic_run=None))
+        assert not raw.get('semantic') and raw['context']['world']=='odom' and raw['err'] is None,raw
+        assert PillowImage.open(raw['rgb']).getpixel((0,0))==(0,0,0)
+        request_close='{"cmd":"close"}\n';reader.stdin.write(request_close);reader.stdin.flush()
+        assert reader.wait()==0
+    finally:
+        if reader.poll() is None:reader.terminate();reader.wait()
     # Intrinsics published once before a selected segment remain usable.
     segment=os.path.join(scratch,'segment')
     subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_frames.py'),path,segment,
@@ -135,6 +174,8 @@ try:
     print(json.dumps(dict(state='passed',checks=['moving_rgb_depth_geometry','bounded_header_pairing',
         'latched_intrinsics_in_segment','big_endian_depth','target_dimensions','map_vertical_orientation',
         'output_reuse_refused','subsecond_image_names','bgr_channel_conversion',
-        'record_time_clock_reset_export','lossless_png_with_stride','failed_export_manifest']),indent=2))
+        'record_time_clock_reset_export','lossless_png_with_stride','failed_export_manifest',
+        'exact_semantic_sample_replay','semantic_context_and_cached_frame','invalid_run_recovery',
+        'raw_reader_bgr_conversion']),indent=2))
 finally:
     shutil.rmtree(scratch)

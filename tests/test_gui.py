@@ -71,6 +71,54 @@ while True:
         self.assertFalse(v._loading)
         v.close()
 
+    def test_semantic_selector_boxes_map_and_export(self):
+        from PIL import Image
+        image = self.folder/'sample.png';Image.new('RGB', (100, 80)).save(str(image))
+        server = self.folder/'semantic_server.py'
+        server.write_text('''import json,sys
+context=dict(dur=5,t0=100,world='map',has_map=True)
+print(json.dumps(dict(dur=5,t0=100,world='base',has_map=False,
+    semantic_runs=[dict(path='/semantic/test',label='yolo26s')])));sys.stdout.flush()
+previous=None
+while True:
+ line=sys.stdin.readline()
+ if not line:break
+ q=json.loads(line)
+ if q.get('cmd')=='close':break
+ selected=q.get('semantic_run')
+ out=dict(t=q['t'],record_time=100+q['t'],frame='map' if selected else 'base',
+     pose=[0,0,0],scan=[[1,0]],rgb=%r,depth=%r,stamps={},err=None,semantic_run=selected)
+ if previous!=selected:
+  out['context']=context if selected else dict(dur=5,t0=100,world='base',has_map=False)
+ if selected:
+  out['semantic']=dict(model='yolo26s',sample='0000',world='map',detections=[
+    dict(label='chair',score=.9,bbox_xywh=[5,20,20,20],status='fused',projection='accepted',object_number=1,included=True)],
+    objects=[dict(label='chair',number=1,x=1,y=1)])
+ previous=selected
+ print(json.dumps(out));sys.stdout.flush()
+''' % (str(image), str(image)))
+        self.gui.SERVER = str(server)
+        v = self.gui.BagViewer(self.root, str(self.folder), 'unused.bag')
+        self.pump(lambda:not v._loading)
+        self.assertEqual(len(v.semantic_picker['values']), 2)
+        v.semantic_picker.current(1);v._select_semantic()
+        self.pump(lambda:bool(v._last.get('semantic')))
+        self.assertEqual(v.world, 'map')
+        self.assertEqual(v._export_rgb.getpixel((5, 20)), self.gui.COLORS['fused'])
+        self.assertIsNotNone(v._map_panel)
+        marked = v._map_panel.tobytes()
+        v.var_points.set(False);v._redraw_semantic()
+        self.assertNotEqual(marked, v._map_panel.tobytes())
+        v.var_boxes.set(False);v._redraw_semantic()
+        self.assertEqual(v._export_rgb.getpixel((5, 20)), (0, 0, 0))
+        v.var_boxes.set(True);v.var_points.set(True);v._redraw_semantic();v.export_combo()
+        self.assertEqual(len(list((self.folder/'exports').glob('*_yolo26s.png'))), 1)
+        v.semantic_picker.current(0);v._select_semantic()
+        self.pump(lambda:not v._last.get('semantic'))
+        self.assertEqual(v.world, 'base')
+        self.assertEqual(v._export_rgb.getpixel((5, 20)), (0, 0, 0))
+        v.close()
+
     def test_session_selection_and_nonblocking_preview(self):
         session=self.folder/'session_test';session.mkdir();(session/'cam_test_0.bag').write_bytes(b'fake')
         probe=self.folder/'probe.py'

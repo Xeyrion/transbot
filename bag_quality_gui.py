@@ -28,6 +28,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from session_catalog import sessions, bag_names, rename_target
 from viewer_core import world_to_view
+from semantic_replay import draw_detections, label_size, COLORS
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 
 import tkinter as tk
@@ -786,6 +787,9 @@ class BagViewer(tk.Toplevel):
         self.has_map = False
         self._map_panel = None
         self._last_map_t = None
+        self._record_t0 = 0.
+        self._semantic_run = None
+        self._semantic_choices = []
         self._build()
         self.protocol('WM_DELETE_WINDOW', self.close)
         self.update_idletasks()
@@ -838,7 +842,31 @@ class BagViewer(tk.Toplevel):
                                     command=self.toggle_frame)
         self.btn_frame.pack(side='left', padx=2)
         self._controls += [self.slider, export_button, self.btn_frame]
+
+        semantic_bar = tk.Frame(self, bg=BG)
+        semantic_bar.pack(fill='x', padx=12, pady=3)
+        tk.Label(semantic_bar, text=tr('语义回放'), bg=BG, fg=DIM).pack(side='left')
+        self.var_semantic = tk.StringVar(value=tr('原始数据'))
+        self.semantic_picker = ttk.Combobox(semantic_bar, textvariable=self.var_semantic,
+                                            values=[tr('原始数据')], width=45, state='readonly')
+        self.semantic_picker.pack(side='left', padx=6)
+        self.semantic_picker.bind('<<ComboboxSelected>>', self._select_semantic)
+        load_semantic = ttk.Button(semantic_bar, text=tr('加载语义结果…'), command=self._load_semantic)
+        load_semantic.pack(side='left', padx=3)
+        self.var_boxes = tk.BooleanVar(value=True)
+        self.var_points = tk.BooleanVar(value=True)
+        self.var_other_classes = tk.BooleanVar(value=False)
+        for text, variable in ((tr('识别框'), self.var_boxes), (tr('物品点'), self.var_points),
+                               (tr('全部类别'), self.var_other_classes)):
+            check = ttk.Checkbutton(semantic_bar, text=text, variable=variable, command=self._redraw_semantic)
+            check.pack(side='left', padx=4)
+            self._controls.append(check)
+        self._controls += [self.semantic_picker, load_semantic]
         self._set_controls(False)
+
+        self.var_semantic_note = tk.StringVar()
+        tk.Label(self, textvariable=self.var_semantic_note, bg=BG, fg=DIM,
+                 anchor='w', wraplength=1200).pack(fill='x', padx=12)
 
         self.var_info = tk.StringVar(value=tr('正在读取会话 TF，请稍候…'))
         tk.Label(self, textvariable=self.var_info, bg=BG, fg=DIM,
@@ -890,6 +918,30 @@ class BagViewer(tk.Toplevel):
         self.loading_label.configure(fg=BAD)
 
     # ------------------------------------------------------------ 交互
+    def _select_semantic(self, _event=None):
+        index = self.semantic_picker.current()
+        self._semantic_run = self._semantic_choices[index-1]['path'] if index > 0 else None
+        if self._playing:
+            self.toggle_play()
+        self.var_semantic_note.set(tr('正在加载语义结果…') if self._semantic_run else '')
+        self._force = True
+
+    def _load_semantic(self):
+        folder = filedialog.askdirectory(parent=self, title=tr('选择包含 run.json 的语义结果文件夹'),
+                                         initialdir=os.path.join(HERE, 'results', 'semantic'))
+        if not folder:
+            return
+        paths = [r['path'] for r in self._semantic_choices]
+        if folder not in paths:
+            self._semantic_choices.append(dict(path=folder, label=os.path.basename(folder)))
+        self.semantic_picker.configure(values=[tr('原始数据')]+[r['label'] for r in self._semantic_choices])
+        self.semantic_picker.current([r['path'] for r in self._semantic_choices].index(folder)+1)
+        self._select_semantic()
+
+    def _redraw_semantic(self):
+        if self._last.get('semantic') and not self._last.get('err'):
+            self._apply(self._last)
+
     def _on_slide(self, _v):
         """拖动中：只更新文字，最多每 150 ms 真的读一帧。
 
@@ -971,6 +1023,8 @@ class BagViewer(tk.Toplevel):
             last = t
             try:
                 self.proc.stdin.write(json.dumps({'t': t,
+                                                  'record_time': self._record_t0+t,
+                                                  'semantic_run': self._semantic_run,
                                                   'frame': self.frame_mode}) + '\n')
                 self.proc.stdin.flush()
                 line = self.proc.stdout.readline()
@@ -999,25 +1053,32 @@ class BagViewer(tk.Toplevel):
         self._drain_job = self.after(16, self._drain)
 
     def _apply(self, d):
+        if d.get('semantic_error'):
+            self._semantic_run = d.get('semantic_run')
+            paths = [r['path'] for r in self._semantic_choices]
+            self.semantic_picker.current(paths.index(self._semantic_run)+1 if self._semantic_run in paths else 0)
+            self.var_semantic_note.set(tr('语义结果加载失败：')+d['err'])
+            return
         if 'init' in d:
             info = d['init']
-            self.dur = info.get('dur', 0.)
-            self.var_t.set('%.1f / %.1f s'%(self._want_t,self.dur))
-            self.slider.configure(to=max(.1, self.dur))
-            self.has_map = info.get('has_map', False)
-            self.map_info = info.get('map_info')
-            if info.get('map_note') or info.get('warning'):
-                self.var_map_note.set(info.get('map_note') or info.get('warning'))
-                self.map_note_label.pack(fill='x',padx=12,before=self.loading_frame)
-            if info.get('warning'):
-                self.title(tr('查看：%s（地图关联无效，已降级）') % self.bag)
-            self.world = info.get('world', 'base')
-            self.frame_mode = self.world
+            self._semantic_choices = info.get('semantic_runs', [])
+            self.semantic_picker.configure(values=[tr('原始数据')]+[r['label'] for r in self._semantic_choices])
+            self._update_context(info)
             self._load_phase=tr('正在准备第一帧')
             self._set_controls(True)
-            self.btn_frame.configure(text=tr('切到车体系') if self.world != 'base' else tr('切到全局视图'))
             return
+        context = d.pop('context', None)
+        if context:
+            self._update_context(context)
+            self.seek(d['record_time']-self._record_t0)
         self._last = d
+        semantic = d.get('semantic')
+        if semantic:
+            self.var_semantic_note.set(tr('模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。'))
+            if not semantic.get('sample'):
+                self.var_semantic_note.set(tr('此处没有临近语义采样帧；拖动时间轴查看其他位置。'))
+        else:
+            self.var_semantic_note.set('')
         self.lbl_scan_title.configure(text={
             'map': tr('地图 · 当前绿 / 历史灰'),
             'odom': tr('里程计 · 当前绿 / 历史灰'),
@@ -1033,20 +1094,23 @@ class BagViewer(tk.Toplevel):
         try:
             from PIL import Image, ImageTk
             if d.get('rgb'):
-                self._export_rgb = Image.open(d['rgb']).copy()
+                self._export_rgb = Image.open(d['rgb']).convert('RGB')
+                if semantic and self.var_boxes.get():
+                    self._export_rgb = draw_detections(self._export_rgb, semantic['detections'], self.var_other_classes.get())
                 box = self._fit(self._export_rgb.copy(), *self._rgb_size)
                 if self._ph_rgb is None:
                     self._ph_rgb = ImageTk.PhotoImage(box)
                     self.lbl_rgb.configure(image=self._ph_rgb, text='')
                 else:
-                    # 复用同一个 Tk 图像：每帧新建会让 X 服务端的图像对象堆积
                     self._ph_rgb.paste(box)
                     self.lbl_rgb.configure(image=self._ph_rgb, text='')
             else:
                 self._export_rgb = None
                 self.lbl_rgb.configure(image='', text=tr('当前时刻无彩色帧'))
             if d.get('depth'):
-                self._export_depth = Image.open(d['depth']).copy()
+                self._export_depth = Image.open(d['depth']).convert('RGB')
+                if semantic and self.var_boxes.get():
+                    self._export_depth = draw_detections(self._export_depth, semantic['detections'], self.var_other_classes.get(), labels=False)
                 box = self._fit(self._export_depth.copy(), *self._depth_size)
                 if self._ph_depth is None:
                     self._ph_depth = ImageTk.PhotoImage(box)
@@ -1059,9 +1123,13 @@ class BagViewer(tk.Toplevel):
                 self.lbl_depth.configure(image='', text=tr('当前时刻无深度帧'))
         except Exception as e:
             self.var_info.set(tr('解码失败：%s') % e)
+            return
 
         pose = d.get('pose')
         bits = [{'map': tr('地图视图'), 'odom': tr('里程计视图（非地图定位）'), 'base': tr('车体系')}.get(d.get('frame'), ''), 't=%.2fs' % d.get('t', 0)]
+        if semantic:
+            bits.append(tr('%s · 采样回放帧 %s') % (semantic['model'], semantic.get('sample') or '--'))
+            bits.append(tr('紫色深度：无效测距'))
         stamps = d.get('stamps', {})
         if 'rgb' in stamps:
             bits.extend('%s-RGB %+.0fms' % (k, (stamps[k]-stamps['rgb'])*1000) for k in ('depth', 'scan') if k in stamps)
@@ -1080,6 +1148,27 @@ class BagViewer(tk.Toplevel):
             self._draw_map_view(pose, scan)
         else:
             self._draw_scan(scan)
+
+    def _update_context(self, info):
+        self._record_t0 = info.get('t0', 0.)
+        self.dur = info.get('dur', 0.)
+        self.var_t.set('%.1f / %.1f s'%(self._want_t,self.dur))
+        self.slider.configure(to=max(.1, self.dur))
+        self.has_map = info.get('has_map', False)
+        self.map_info = info.get('map_info')
+        if info.get('map_note') or info.get('warning'):
+            self.var_map_note.set(info.get('map_note') or info.get('warning'))
+            self.map_note_label.pack(fill='x',padx=12,before=self.loading_frame)
+        else:
+            self.map_note_label.pack_forget()
+        if info.get('warning'):
+            self.title(tr('查看：%s（地图关联无效，已降级）') % self.bag)
+        self.world = info.get('world', 'base')
+        self.frame_mode = self.world
+        self._map_img = None
+        self._map_panel = None
+        self._last_map_t = None
+        self.btn_frame.configure(text=tr('切到车体系') if self.world != 'base' else tr('切到全局视图'))
 
     @staticmethod
     def _fit(im, w, h):
@@ -1162,6 +1251,22 @@ class BagViewer(tk.Toplevel):
             if p is not None:
                 vx, vy = p
                 d.rectangle([vx - 1, vy - 1, vx + 1, vy + 1], fill=CURRENT_GREEN)
+        semantic = self._last.get('semantic')
+        if semantic and self.var_points.get() and self.frame_mode == semantic['world']:
+            active = set(det['object_number'] for det in semantic['detections'] if det.get('object_number'))
+            for obj in semantic['objects']:
+                p = world_to_view(obj['x'], obj['y'], pose, span, pixels)
+                if p is None:
+                    continue
+                x, y = p
+                color = COLORS['fused'] if obj['number'] in active else COLORS['depth']
+                d.ellipse((x-4, y-4, x+4, y+4), fill=color, outline=(10, 20, 30))
+                text = '#%d %s' % (obj['number'], obj['label'])
+                width, height = label_size(d, text)
+                tx = min(max(0, x+5), max(0, pixels-width))
+                ty = max(0, min(pixels-height, y-height))
+                d.rectangle((tx, ty, tx+width, ty+height), fill=(13, 17, 23))
+                d.text((tx+2, ty), text, fill=color)
         a = math.radians(pose[2])
         ca, sa = math.cos(a), math.sin(a)
         L, cx, cy = 14, pixels/2., pixels/2.
@@ -1233,6 +1338,9 @@ class BagViewer(tk.Toplevel):
         if pose:
             cap += '   pose (%.2f, %.2f) %.0f deg' % (pose[0], pose[1], pose[2])
         cap += '   lidar %d pts' % len(d.get('scan') or [])
+        semantic = d.get('semantic')
+        if semantic:
+            cap += '   %s sample %s | inference / full-session fusion' % (semantic['model'], semantic.get('sample'))
         dr.text((10, 8), bag, fill=(20, 20, 20))
         dr.text((10, 26), cap, fill=(90, 100, 110))
 
@@ -1276,7 +1384,8 @@ class BagViewer(tk.Toplevel):
         out_dir = os.path.join(self.folder, 'exports')
         if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
-        out = os.path.join(out_dir, '%s_t%05.1f.png' % (bag[:-4], d.get('t', 0)))
+        suffix = '_'+semantic['model'] if semantic else ''
+        out = os.path.join(out_dir, '%s_t%05.1f%s.png' % (bag[:-4], d.get('t', 0), suffix))
         canvas.save(out)
         self.var_info.set(tr('已导出 ') + out)
 
