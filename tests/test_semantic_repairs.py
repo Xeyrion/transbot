@@ -49,6 +49,24 @@ class TimeGeometryTests(unittest.TestCase):
         m=pose.interpolate(a,b,.5)
         self.assertAlmostEqual(m[0][0],-1.,places=6)
 
+    def test_bounded_same_stamp_correction_retains_latest_pose_and_provenance(self):
+        tf=pose.Tf()
+        tf.add('odom','base',1.,pose.transform([0,0,0],pose.yaw_quat(0)))
+        tf.add('odom','base',1.,pose.transform([.0003,0,0],pose.yaw_quat(.0002)))
+        tf.finish()
+        self.assertEqual(len(tf.edges[('odom','base')]),1)
+        self.assertAlmostEqual(tf.at(('odom','base'),1.)[0][3],.0003)
+        self.assertEqual(len(tf.duplicate_updates),1)
+        tf.finish();self.assertEqual(len(tf.duplicate_updates),1)
+
+    def test_same_stamp_correction_cannot_chain_past_translation_or_rotation_limit(self):
+        tf=pose.Tf()
+        for x in [0.,.0008,.0016]:tf.add('odom','base',1.,pose.transform([x,0,0],pose.yaw_quat(0)))
+        with self.assertRaises(ValueError):tf.finish()
+        tf=pose.Tf()
+        for yaw in [0.,math.radians(.2)]:tf.add('odom','base',1.,pose.transform([0,0,0],pose.yaw_quat(yaw)))
+        with self.assertRaises(ValueError):tf.finish()
+
 
 class RecordingOutcomeTests(unittest.TestCase):
     def outcome(self, rc=0, active=False, counts=None, stopped=False, timeout=False):

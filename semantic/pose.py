@@ -8,6 +8,7 @@
 """
 import math
 import bisect
+import itertools
 
 # (parent, child) → ((x, y, z), yaw 弧度)
 FILL_INS = {
@@ -90,6 +91,8 @@ class Tf(object):
         self.static = {}
         self.times = {}
         self.estimated = []
+        self.duplicate_updates = []
+        self.identical_duplicates = 0
 
     def add(self, parent, child, stamp, matrix, static=False):
         parent, child = parent.strip('/'), child.strip('/')
@@ -109,12 +112,31 @@ class Tf(object):
     def finish(self):
         for key in self.edges:
             self.edges[key].sort(key=lambda e: e[0])
-            self.times[key] = [v[0] for v in self.edges[key]]
             for i,(stamp,matrix) in enumerate(self.edges[key]):
                 reference=self.static.get(key)
-                if reference is None and i and stamp==self.edges[key][i-1][0]: reference=self.edges[key][i-1][1]
                 if reference is not None and max(abs(reference[r][c]-matrix[r][c]) for r in range(4) for c in range(4))>1e-5:
                     raise ValueError('Conflicting TF values at '+str(key))
+            if key not in self.static:
+                unique=[]
+                for stamp,items in itertools.groupby(self.edges[key],key=lambda entry:entry[0]):
+                    group=list(items);translation=rotation=0.
+                    for i,unused in enumerate(group):
+                        a=group[i][1]
+                        for _,b in group[i+1:]:
+                            translation=max(translation,math.sqrt(sum((a[r][3]-b[r][3])**2 for r in range(3))))
+                            trace=sum(a[r][c]*b[r][c] for r in range(3) for c in range(3))
+                            rotation=max(rotation,math.acos(max(-1.,min(1.,(trace-1.)/2.))))
+                    if translation>.001+1e-12 or rotation>math.radians(.1)+1e-12:
+                        raise ValueError('Conflicting TF values at '+str(key))
+                    if len(group)>1:
+                        if translation>1e-9 or rotation>1e-7:
+                            self.duplicate_updates.append(dict(parent=key[0],child=key[1],stamp=stamp,
+                                samples=len(group),translation_span_m=translation,rotation_span_deg=math.degrees(rotation),
+                                policy='last input in source-record order; bounded same-stamp correction'))
+                        else:self.identical_duplicates+=len(group)-1
+                    unique.append(group[-1])
+                self.edges[key]=unique
+            self.times[key] = [v[0] for v in self.edges[key]]
         self.parent = {}
         for parent, child in sorted(self.edges):
             if child in self.parent and self.parent[child] != parent:

@@ -89,7 +89,9 @@ def load_tf(files, log, bounds=(None, None), allow_estimated=False, calibration=
     repair_cal=repair.get('calibration') or {}
     tf.geometry = dict(map=linked, calibration_id=tf.calibration_id or repair_cal.get('id'),
                        calibration_estimated=tf.calibration_estimated or repair_cal.get('estimated',False),replaced_recorded_extrinsics=replaced,
-                       estimated_extrinsics=[list(k) for k in tf.estimated]+repair.get('estimated_extrinsics',[]))
+                       estimated_extrinsics=[list(k) for k in tf.estimated]+repair.get('estimated_extrinsics',[]),
+                       duplicate_tf=dict(corrections=tf.duplicate_updates,identical_samples=tf.identical_duplicates,
+                                         max_translation_m=.001,max_rotation_deg=.1))
     return tf
 
 
