@@ -22,7 +22,7 @@ def active_recorders():
     return result
 
 
-def start(payload):
+def verify_bundle(payload):
     if payload.get('protocol_version')!=1: raise ValueError('Unsupported recorder protocol')
     root=Path(payload['root']).resolve()
     bad=[]
@@ -31,6 +31,11 @@ def start(payload):
         target=root/name
         if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest()!=digest: bad.append(name)
     if bad: raise ValueError('Recorder bundle mismatch: '+', '.join(bad)+'. Deploy the full bundle before recording.')
+    return root
+
+
+def start(payload):
+    root=verify_bundle(payload)
     active=active_recorders()
     if active: raise RuntimeError('Recording/finalization is already active: '+str(active))
     duration=payload['duration']

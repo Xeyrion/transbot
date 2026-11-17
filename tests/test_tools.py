@@ -373,7 +373,7 @@ class LifecycleTests(unittest.TestCase):
                 script = script.replace('"$HOME/software/', '"/nonexistent/software/').replace('"$HOME/transbot_ws/', '"/nonexistent/transbot_ws/')
                 (root/'auto.sh').write_text(script)
                 (root/'calibration_schema.py').write_bytes((ROOT/'calibration_schema.py').read_bytes())
-                for helper in ['session_finalize.py', 'record_quality.py', 'record_guard.py','live_health.py','stream_health.py','clock_check.py']:
+                for helper in ['session_finalize.py','session_status.py','stop_recording.py', 'record_quality.py', 'record_guard.py','live_health.py','stream_health.py','clock_check.py']:
                     (root/helper).write_bytes((ROOT/'recording'/helper).read_bytes())
                 for name, body in {
                     'rostopic': '#!/bin/sh\n[ "$1" = list ] && printf "/scan\\n/odom\\n/tf\\n"; exit 0\n',
@@ -410,6 +410,8 @@ class LifecycleTests(unittest.TestCase):
             fake.chmod(0o755)
             (root/'preflight.sh').write_text('#!/bin/bash\nexit 0\n')
             pth = root/'record_full.sh'; pth.write_text(script); pth.chmod(0o755)
+            for helper in ['session_status.py','stop_recording.py']:
+                (root/helper).write_bytes((ROOT/'recording'/helper).read_bytes())
             p = subprocess.Popen(['bash', str(pth), '--no-launch', '-o', str(root/'out')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 deadline = time.monotonic()+5

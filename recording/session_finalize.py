@@ -8,6 +8,7 @@ import subprocess
 import sys
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from calibration_schema import load_calibration
+from session_status import last_result_path
 
 REQUIRED = {
     'full': ['/camera/rgb/image_raw', '/camera/depth/image_raw',
@@ -69,6 +70,12 @@ def finalize(root, stamp, profile, rc, stopped=False, timed_out=False,
     with open(prefix + '.session.json.tmp', 'w') as f:
         json.dump(data, f, indent=2)
     os.replace(prefix + '.session.json.tmp', prefix + '.session.json')
+    try:
+        path=last_result_path()
+        with open(path+'.tmp','w') as f:
+            json.dump(dict(session=data['session'],directory=root,complete=data['complete'],stop_reason=data['stop_reason']),f)
+        os.replace(path+'.tmp',path)
+    except OSError:pass
     return data
 
 

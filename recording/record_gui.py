@@ -154,6 +154,7 @@ class Teleop:
         self.pub = None
         self._was_armed = False
         self._thread = None
+        self._reset = threading.Event()
 
     # -- 外部接口 ------------------------------------------------------
     def start(self):
@@ -178,6 +179,10 @@ class Teleop:
     def clear_keys(self):
         with self.lock:
             self.keys.clear()
+
+    def reconnect(self):
+        self.set_armed(False);self.clear_keys();self._reset.set()
+        if not self._thread or not self._thread.is_alive():self.start()
 
     def zero_burst(self, n=5):
         with self.lock:
@@ -214,15 +219,22 @@ class Teleop:
             return
 
         try:
-            rospy.init_node('record_gui_teleop', anonymous=True, disable_signals=True)
+            if not rospy.core.is_initialized():
+                rospy.init_node('record_gui_teleop', anonymous=True, disable_signals=True)
             self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         except Exception as exc:
             self.error = tr('连不上 ROS master：%s') % exc
             return
 
         self.ready = True
-        rate = rospy.Rate(20)
         while not self.stop_flag:
+            if self._reset.is_set():
+                self._reset.clear()
+                try:
+                    if self.pub:self.pub.unregister()
+                    self.pub=rospy.Publisher('/cmd_vel',Twist,queue_size=1)
+                    self.ready=True;self.error=''
+                except Exception as exc:self.ready=False;self.error=str(exc)
             with self.lock:
                 armed = self.armed
                 keys = set(self.keys)
@@ -255,7 +267,7 @@ class Teleop:
                 # 刚解除：补几帧零速，确保机器人收到
                 self.zero_burst(3)
                 self._was_armed = False
-            rate.sleep()
+            time.sleep(.05)
 
 
 # ======================================================================
@@ -465,6 +477,7 @@ class App:
         self.busy = None
         self.last_rec = None
         self.log_lines = 0
+        self.clock_offset=None
 
         self.teleop = Teleop(remote)
         self.teleop.start()
@@ -568,6 +581,16 @@ class App:
         self.v_tel = tk.Label(self.card_link, text=tr('遥控：未启用'), bg=CARD, fg=DIM,
                               font=('', 9), anchor='w')
         self.v_tel.pack(fill=tk.X, pady=(4, 0))
+        self.v_clock=tk.Label(self.card_link,text=tr('时间：等待状态'),bg=CARD,fg=DIM,anchor='w',font=('',9))
+        self.v_clock.pack(fill=tk.X)
+
+        prep=tk.LabelFrame(r,text=tr(' 录前准备 '),bg=CARD,fg=INK,padx=10,pady=6)
+        prep.pack(fill=tk.X,padx=14,pady=(8,0))
+        self.prepare_buttons=[]
+        for action,label in [('all','一键准备'),('clock','校准时间'),('camera','启动/恢复相机'),('lidar','启动/恢复雷达')]:
+            button=tk.Button(prep,text=tr(label),padx=9,command=lambda a=action:self.on_prepare(a))
+            button.pack(side=tk.LEFT,padx=(0,7));self.prepare_buttons.append(button)
+        tk.Label(prep,text=tr('仅空闲时使用；校时或恢复驱动可能重启数据源'),bg=CARD,fg=DIM,font=('',9)).pack(side=tk.LEFT)
 
         # ---- 中间：录制控制 + 键盘遥控 ----
         mid = tk.Frame(r, bg=BG)
@@ -813,6 +836,8 @@ class App:
                 elif kind == 'busy':
                     self.busy = payload
                     self._refresh_buttons()
+                elif kind == 'teleop_reconnect':
+                    self.teleop.reconnect()
                 elif kind == 'listing':
                     self._open_picker(payload)
         except queue.Empty:
@@ -823,6 +848,8 @@ class App:
             self.root.after(200, self._tick)
 
     def _public_show(self, d):
+        try:self.clock_offset=float(d['t'])-time.time()
+        except (KeyError,TypeError,ValueError):self.clock_offset=None
         if not self.online:
             self.online = True
             self._log(tr('已连上机器人 %s（状态每秒刷新）') % self.remote.target)
@@ -850,7 +877,12 @@ class App:
                 text=('WiFi %d ms' % self.rtt) if self.rtt is not None else 'WiFi --')
 
         # 录制卡片
-        if not stale and d.get('rec'):
+        phase=d.get('phase','recording' if d.get('rec') else 'idle')
+        if not stale and phase in ('preparing','finalizing'):
+            self.v_rec.configure(text=tr('● 准备中') if phase=='preparing' else tr('● 收尾中'),fg=WARN)
+            self.v_rec_sub.configure(text=tr('正在检查和启动数据源，请等待') if phase=='preparing' else tr('正在关闭并校验 bag，请等待'))
+            self.v_rec_sub2.configure(text='')
+        elif not stale and d.get('rec'):
             self.v_rec.configure(text=tr('● 录制中'), fg=OK)
             self.v_rec_sub.configure(
                 text=tr('%s    已录 %s') % (fmt_hms(d.get('elapsed', 0)),
@@ -926,12 +958,18 @@ class App:
                 fg=ACCENT if self.var_arm.get() else DIM)
         else:
             self.v_tel.configure(text=tr('遥控：ROS 未连接'), fg=BAD)
+        if stale or self.clock_offset is None:
+            self.v_clock.configure(text=tr('时间：等待状态'),fg=DIM)
+        else:
+            self.v_clock.configure(text=tr('时间差：%+.2f 秒')%self.clock_offset,fg=OK if abs(self.clock_offset)<2 else BAD)
 
         # 提示行
         if stale:
             self.v_hint.configure(text=tr('看不到机器人状态：检查 WiFi / SSH。'), fg=BAD)
         elif self.busy:
             self.v_hint.configure(text=self.busy, fg=WARN)
+        elif phase in ('preparing','finalizing'):
+            self.v_hint.configure(text=tr('启动请求正在处理，请勿重复点击') if phase=='preparing' else tr('正在收尾，完成后可开始下一轮'),fg=WARN)
         elif d.get('rec'):
             left = ''
             try:
@@ -941,13 +979,21 @@ class App:
                 pass
             self.v_hint.configure(text=tr('录制中%s。到点会自动停。') % left, fg=OK)
         else:
-            self.v_hint.configure(
-                text=tr('机器人最近输出：%s') % (translate_log(d.get('log', '')) or '—'), fg=DIM)
+            last=d.get('last_recording',{})
+            reasons={'health_observer_failed':tr('监测心跳未及时更新，数据已保留'),
+                     'stream_fault':tr('数据流检查失败，数据已保留'),'clock_jump':tr('录制时发生跳时，数据已保留')}
+            hint=reasons.get(last.get('stop_reason')) if last.get('complete') is False else None
+            self.v_hint.configure(text=hint or tr('机器人最近输出：%s') % (translate_log(d.get('log', '')) or '—'),fg=BAD if hint else DIM)
+        self._refresh_buttons()
 
     def _refresh_buttons(self):
         state = tk.DISABLED if self.busy else tk.NORMAL
         for b in (self.btn_start, self.btn_stop, self.btn_pull, self.btn_delete):
             b.configure(state=state)
+        active=self.state.get('phase') in ('preparing','recording','finalizing') or self.state.get('rec')
+        if active:self.btn_start.configure(state=tk.DISABLED)
+        for button in self.prepare_buttons:
+            button.configure(state=tk.DISABLED if self.busy or active or not self.online else tk.NORMAL)
 
     # ------------------------------------------------------------ 键盘
     def _typing(self):
@@ -1056,13 +1102,24 @@ class App:
                     if line:
                         self.q.put(('log', line))
                 proc.wait()
-                self.q.put(('log', tr('%s 结束（退出码 %d）') % (busy_text, proc.returncode)))
+                if args[0]=='start' and proc.returncode==0:
+                    self.q.put(('log',tr('启动请求已提交，正在准备数据源')))
+                else:self.q.put(('log', tr('%s 结束（退出码 %d）') % (busy_text, proc.returncode)))
             except Exception as exc:
                 self.q.put(('log', tr('%s 出错：%s') % (busy_text, exc)))
             finally:
+                if args[0]=='prepare':self.q.put(('teleop_reconnect',None))
                 self.q.put(('busy', None))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def on_prepare(self,action):
+        if self.state.get('rec') or self.state.get('phase') in ('preparing','finalizing'):
+            self._log(tr('录制或收尾期间不能校时和恢复驱动'))
+            return
+        self._disarm(tr('录前准备'));self.teleop.clear_keys()
+        labels={'all':tr('一键准备'),'clock':tr('校准时间'),'camera':tr('启动/恢复相机'),'lidar':tr('启动/恢复雷达')}
+        self._run_script(['prepare',action],labels[action])
 
     def on_start(self):
         try:

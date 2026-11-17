@@ -60,46 +60,8 @@ depth_aligned() {
 check_all() {
   FAILED=0
   echo "== 自检 =="
-  if ! timeout 3 rostopic list >/dev/null 2>&1; then
-    report fail "ROS master 没起来（roscore）"
-    return
-  fi
-  for t in /scan /odom; do
-    if has_data "$t"; then report ok "$t 有数据"; else report fail "$t 没数据"; fi
-  done
-  for t in /camera/rgb/image_raw /camera/depth/image_raw /camera/rgb/camera_info /camera/depth/camera_info; do
-    if has_data "$t"; then report ok "$t 有数据"; else report fail "$t 没数据"; fi
-  done
-  if has_data /camera/depth/image_raw; then
-    if depth_aligned; then
-      report ok "深度已对齐到彩色帧"
-    else
-      report warn "Unregistered depth: explicit intrinsics and optical TF are required for reprojection"
-    fi
-  fi
-  for pair in "odom base_footprint" "base_footprint base_link" "base_link laser" "base_link camera_link"; do
-    set -- $pair
-    if tf_ok "$1" "$2"; then report ok "TF $1→$2"; else report fail "TF $1→$2 缺"; fi
-  done
-  if [ -n "${BAGTOOLS_CALIBRATION:-}" ]; then
-    if calibration_ok; then
-      report ok "Installation TF matches calibration; one publisher per configured edge"
-    else
-      report fail "Installation TF differs from calibration or has conflicting publishers"
-    fi
-  fi
-  for t in /camera/rgb/image_raw /camera/depth/image_raw; do
-    frame=$(frame_of "$t")
-    if [ -n "$frame" ] && tf_ok base_link "$frame"; then
-      report ok "Optical TF: base_link -> $frame"
-    else
-      report fail "Optical TF is missing for $t ($frame)"
-    fi
-  done
-  if tf_ok map odom; then
-    report ok "TF map→odom（有地图系）"
-  else
-    report warn "TF map→odom 缺（没开 SLAM；物体能投到里程计系，但会漂）"
+  if ! timeout -k 1 15 python2 "$HERE/check_tf.py" --preflight "${BAGTOOLS_CALIBRATION:--}"; then
+    FAILED=1
   fi
 }
 

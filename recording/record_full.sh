@@ -109,6 +109,7 @@ cancel() {
 }
 trap cleanup EXIT
 trap cancel INT TERM
+python3 "$SCRIPT_DIR/session_status.py" --phase preparing
 
 # ---------- ROS 环境 ----------
 # ROS 的 setup.bash 里有未定义变量，set -u 会报错，先临时关掉

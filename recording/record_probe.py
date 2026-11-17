@@ -30,6 +30,7 @@ import sys
 import time
 import threading
 from stop_recording import processes
+from session_status import phase_path,last_result_path
 
 TOPICS = ['/camera/rgb/image_raw', '/camera/depth/image_raw', '/scan']
 PERIOD = 1.0
@@ -152,6 +153,14 @@ def topic_rates(snapshot, now):
     return result
 
 
+def recording_phase(procs,files,phase_info):
+    wrappers={pid for pid,args in procs.items() if any(os.path.basename(a) in ('record_full.sh','auto_record_cam.sh') for a in args[:2])}
+    phase=phase_info.get('phase') if phase_info.get('owner_pid') in wrappers else None
+    if phase=='finalizing':return 'finalizing'
+    if files:return 'recording'
+    return 'preparing' if wrappers else 'idle'
+
+
 # ---------------------------------------------------------------- 主循环
 def main():
     prev_bytes = 0
@@ -166,11 +175,14 @@ def main():
         source.update(master)
         prefix, files, elapsed, sessions = bag_state(procs)
         now=time.monotonic()
+        try:phase_info=json.loads(read_file(phase_path()))
+        except ValueError:phase_info={}
         health={}
         if prefix:
             stem=prefix[:-4] if prefix.endswith('.bag') else prefix
             try:
-                with open(stem+'.health.json') as f: health=json.load(f)
+                live_path=phase_info.get('health_path') or stem+'.health.json'
+                with open(live_path) as f: health=json.load(f)
             except (OSError,ValueError): pass
         snapshot=source.snapshot()
         now=time.monotonic()
@@ -192,10 +204,14 @@ def main():
 
         log_tail = read_file('/tmp/record_full_console.log', 600).splitlines()
         log_last = log_tail[-1].strip() if log_tail else ''
+        try:last_recording=json.loads(read_file(last_result_path()))
+        except ValueError:last_recording={}
 
         rec = {
             't': round(time.time(), 1),
             'rec': 1 if files else 0,
+            'phase': recording_phase(procs,files,phase_info),
+            'last_recording': last_recording,
             'bag': os.path.basename(prefix) if prefix else '',
             'files': len(files),
             'sessions': sessions,

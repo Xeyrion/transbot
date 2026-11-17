@@ -4,8 +4,22 @@ import datetime
 import glob
 import os
 import shutil
+import json
+import sys
+import time
 
 from stop_recording import processes
+
+
+def phase_path():return '/dev/shm/bagtools_record_%d.phase.json'%getattr(os,'getuid',lambda:0)()
+def last_result_path():return '/dev/shm/bagtools_record_%d.last.json'%getattr(os,'getuid',lambda:0)()
+
+
+def write_phase(phase,health_path=None):
+    path=phase_path()
+    temporary=path+'.'+str(os.getpid())
+    with open(temporary,'w') as f:json.dump(dict(phase=phase,owner_pid=os.getppid(),health_path=health_path,updated_monotonic=time.monotonic()),f)
+    os.replace(temporary,path)
 
 
 def snapshot(procs):
@@ -51,4 +65,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv)>=3 and sys.argv[1]=='--phase':
+        write_phase(sys.argv[2],sys.argv[4] if len(sys.argv)==5 and sys.argv[3]=='--health' else None)
+    else:main()

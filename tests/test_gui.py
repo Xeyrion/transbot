@@ -182,6 +182,20 @@ while True:
                 home.close()
                 child.terminate.assert_not_called()
 
+    def test_preparing_state_blocks_duplicate_start_and_maintenance(self):
+        import record_gui
+        with patch('record_gui.threading.Thread.start'):
+            app=record_gui.App(self.root,record_gui.Remote('jetson@192.168.1.11','unused'))
+        app.state=dict(rec=0,phase='preparing',ros_ok=1,rgb=30.,depth=30.,scan=7.)
+        app.state_t=time.monotonic();app.online=True;app._render()
+        self.assertEqual(app.btn_start.cget('state'),'disabled')
+        self.assertTrue(all(b.cget('state')=='disabled' for b in app.prepare_buttons))
+        with patch.object(app,'_run_script') as run:
+            app.on_prepare('clock');run.assert_not_called()
+            app.state['phase']='idle';app._render()
+            app.on_prepare('camera');self.assertEqual(run.call_args[0][0],['prepare','camera'])
+        app.closing=True
+
     def test_english_workbench_and_recorder_labels(self):
         from workbench import Workbench
         with patch.dict(os.environ,{'BAGTOOLS_LANG':'en'}):

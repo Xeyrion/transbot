@@ -23,6 +23,8 @@ class HealthTests(unittest.TestCase):
             source=source.replace('/tmp/transbot_record.',d+'/lock.').replace('source /opt/ros/melodic/setup.bash',':')
             source=source.replace('if [ -f "$HOME/','if [ -f "/nonexistent/')
             (p/'record_full.sh').write_text(source)
+            for helper in ['session_status.py','stop_recording.py']:
+                (p/helper).write_bytes((ROOT/'recording'/helper).read_bytes())
             (p/'preflight.sh').write_text('#!/bin/bash\necho ready > '+d+'/ready\ntrap "echo stopped > '+d+'/stopped; exit 143" TERM\nwhile :; do sleep .05; done\n')
             auto=p/'auto_record_cam.sh'; auto.write_text('#!/bin/bash\ntouch '+d+'/started\n'); auto.chmod(0o755)
             child=subprocess.Popen(['bash',str(p/'record_full.sh'),'--no-launch','-o',str(p/'out')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

@@ -23,6 +23,8 @@ class ClockHealthTests(unittest.TestCase):
             source=source.replace('/tmp/transbot_record.',d+'/record.').replace('source /opt/ros/melodic/setup.bash',':')
             source=source.replace('if [ -f "$HOME/','if [ -f "/nonexistent/')
             (p/'record_full.sh').write_text(source)
+            for helper in ['session_status.py','stop_recording.py']:
+                (p/helper).write_bytes((ROOT/'recording'/helper).read_bytes())
             (p/'preflight.sh').write_text('#!/bin/bash\nsleep 30 >/dev/null 2>&1 &\necho $! > '+d+'/child\nexit 0\n')
             recorder=p/'auto_record_cam.sh';recorder.write_text('#!/bin/bash\nexit 0\n');recorder.chmod(0o755)
             try:

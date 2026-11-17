@@ -86,6 +86,10 @@ case "$cmd" in
 
     ;;
 
+  prepare)
+    exec env ROBOT="$ROBOT" ROBOT_PASS="$ROBOT_PASS" python3 "$SCRIPT_DIR/robot_prepare.py" --action "${1:-all}"
+    ;;
+
   stop)
     echo "== 优雅停止 =="
     "${SSH[@]}" 'python3 /home/jetson/stop_recording.py'

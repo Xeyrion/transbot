@@ -36,3 +36,10 @@ class ProbeTests(unittest.TestCase):
             p=Path(folder)/'log';p.write_bytes(b'x'*100000+b'final')
             self.assertEqual(probe.read_file(str(p),5),'final')
             self.assertEqual(probe.file_size(str(p/'missing')),0)
+
+    def test_preparation_and_finalization_are_not_idle(self):
+        procs={12:['bash','/home/jetson/record_full.sh']}
+        self.assertEqual(probe.recording_phase(procs,[],{}),'preparing')
+        phase=dict(owner_pid=12,phase='finalizing')
+        self.assertEqual(probe.recording_phase(procs,['bag.active'],phase),'finalizing')
+        self.assertEqual(probe.recording_phase({},[],phase),'idle')

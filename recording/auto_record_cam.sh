@@ -56,7 +56,7 @@ if [ "$MAX_SPLITS" -gt 0 ] && [ "${ALLOW_RING_BUFFER:-0}" != 1 ]; then
   echo 'ERROR: ring-buffer deletion requires explicit ALLOW_RING_BUFFER=1' >&2
   exit 2
 fi
-for helper in session_finalize.py record_quality.py record_guard.py live_health.py stream_health.py clock_check.py; do
+for helper in session_finalize.py session_status.py stop_recording.py record_quality.py record_guard.py live_health.py stream_health.py clock_check.py; do
   [ -f "$SCRIPT_DIR/$helper" ] || { echo "ERROR: incomplete recorder deployment: $helper" >&2; exit 1; }
 done
 command -v python2 >/dev/null || { echo 'ERROR: python2 rosbag reader is required for finalization' >&2; exit 1; }
@@ -280,6 +280,8 @@ ARGS=(--lz4 --split --size="$SPLIT_MB")
 # “每卷录 N 秒”而不是“总共录 N 秒”。这里自己计时，到点发 SIGINT，
 # 让 rosbag 正常收尾。必须等它真正退出，否则会留下 .bag.active（不可读）。
 BAG_PID=""
+RUNTIME_DIR=$(mktemp -d /dev/shm/bagtools-record.XXXXXX)
+HEALTH_PATH="$RUNTIME_DIR/health.json"
 GUARD_PID=""
 HEALTH_PID=""
 RC=255
@@ -287,6 +289,7 @@ STOP_REQUESTED=0
 STOP_TIMEOUT=0
 STOP_REASON=natural
 stop_record() {
+  python3 "$SCRIPT_DIR/session_status.py" --phase finalizing --health "$HEALTH_PATH"
   STOP_REQUESTED=1
   [ -z "$BAG_PID" ] && return 0
   kill -0 "$BAG_PID" 2>/dev/null || return 0
@@ -311,17 +314,24 @@ stop_record() {
   return 1
 }
 finalize_record() {
+  python3 "$SCRIPT_DIR/session_status.py" --phase finalizing --health "$HEALTH_PATH"
   if [ -n "$HEALTH_PID" ]; then
     kill -TERM "$HEALTH_PID" 2>/dev/null || true
     wait "$HEALTH_PID" 2>/dev/null || true
     HEALTH_PID=""
   fi
+  for pair in "health.json:health.json" "guard.txt:guard" "guard.json:guard.json"; do
+    src="${pair%%:*}"; dst="${pair#*:}"
+    [ ! -f "$RUNTIME_DIR/$src" ] || cp -- "$RUNTIME_DIR/$src" "$OUT_DIR/cam_$STAMP.$dst"
+  done
   shopt -s nullglob
   local complete=("$OUT_DIR"/cam_"$STAMP"*.bag)
   local active=("$OUT_DIR"/cam_"$STAMP"*.bag.active)
   local result=0
   python3 "$SCRIPT_DIR/session_finalize.py" "$OUT_DIR" "$STAMP" "$PROFILE" \
     "$RC" "$STOP_REQUESTED" "$STOP_TIMEOUT" "$STOP_REASON" || result=$?
+  rm -f -- "$RUNTIME_DIR/health.json" "$RUNTIME_DIR/health.json.tmp" "$RUNTIME_DIR/guard.txt" "$RUNTIME_DIR/guard.json" "$RUNTIME_DIR/guard.json.tmp"
+  rmdir -- "$RUNTIME_DIR" 2>/dev/null || true
   echo "=== 会话收尾：完成 ${#complete[@]} 卷，未关闭 ${#active[@]} 卷 ==="
   if [ "$result" -ne 0 ]; then echo 'ERROR: 会话不完整，保留全部原文件。' >&2; fi
   return "$result"
@@ -347,21 +357,22 @@ trap cancel_record INT TERM
 
 rosbag record -O "$BAG" "${ARGS[@]}" "${TOPICS[@]}" &
 BAG_PID=$!
-python2 "$SCRIPT_DIR/live_health.py" "$PROFILE" "$OUT_DIR/cam_$STAMP.health.json" \
+python2 "$SCRIPT_DIR/live_health.py" "$PROFILE" "$HEALTH_PATH" \
   --timeout "${STREAM_TIMEOUT_SEC:-3}" > "$OUT_DIR/cam_$STAMP.health.log" 2>&1 &
 HEALTH_PID=$!
-HEALTH_ARGS=(--health "$OUT_DIR/cam_$STAMP.health.json")
+python3 "$SCRIPT_DIR/session_status.py" --phase recording --health "$HEALTH_PATH"
+HEALTH_ARGS=(--health "$HEALTH_PATH" --evidence "$RUNTIME_DIR/guard.json")
 if [ "$ALLOW_MISSING" -eq 1 ]; then HEALTH_ARGS+=(--diagnostic); fi
 
 python3 "$SCRIPT_DIR/record_guard.py" "$BAG_PID" "$OUT_DIR/cam_$STAMP" \
-  "$DURATION" "$MIN_FREE_GB" "${HEALTH_ARGS[@]}" > "$OUT_DIR/cam_$STAMP.guard" &
+  "$DURATION" "$MIN_FREE_GB" "${HEALTH_ARGS[@]}" > "$RUNTIME_DIR/guard.txt" &
 GUARD_PID=$!
 set +e
 wait "$GUARD_PID"
 GUARD_RC=$?
 set -e
 GUARD_PID=""
-STOP_REASON=$(cat "$OUT_DIR/cam_$STAMP.guard")
+STOP_REASON=$(cat "$RUNTIME_DIR/guard.txt")
 if [ "$GUARD_RC" -ne 0 ]; then STOP_REASON=guard_failed; fi
 case "$STOP_REASON" in
   process_exit) ;;

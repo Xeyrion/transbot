@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+import struct
 import rospy
 import tf2_ros
 from tf2_msgs.msg import TFMessage
@@ -59,9 +60,53 @@ def check_calibration(path):
     return 0 if result['matched'] else 1
 
 
+def check_inputs(path=None):
+    """Gather streams and TF in one ROS process instead of repeated CLI startups."""
+    from rospy.msg import AnyMsg
+    expected={'/scan':'sensor_msgs/LaserScan','/odom':'nav_msgs/Odometry',
+              '/camera/rgb/image_raw':'sensor_msgs/Image','/camera/depth/image_raw':'sensor_msgs/Image',
+              '/camera/rgb/camera_info':'sensor_msgs/CameraInfo','/camera/depth/camera_info':'sensor_msgs/CameraInfo'}
+    observed={};lock=threading.Lock()
+    buffer=tf2_ros.Buffer();listener=tf2_ros.TransformListener(buffer)
+    def observe(msg,topic):
+        try:
+            length=struct.unpack_from('<I',msg._buff,12)[0]
+            frame=msg._buff[16:16+length].decode('utf-8').strip('/')
+            kind=msg._connection_header.get('type')
+            with lock:observed[topic]=(frame,kind)
+        except Exception:
+            with lock:observed[topic]=('',None)
+    subscribers=[rospy.Subscriber(t,AnyMsg,observe,callback_args=t,queue_size=1,buff_size=2**22) for t in expected]
+    deadline=monotonic()+3.5
+    while not rospy.is_shutdown() and monotonic()<deadline:time.sleep(.05)
+    failures=[]
+    def report(ok,message):
+        print(('OK    ' if ok else 'FAIL  ')+message)
+        if not ok:failures.append(message)
+    with lock:streams=dict(observed)
+    for topic,kind in sorted(expected.items()):
+        report(topic in streams and streams[topic][1]==kind,topic+' data and type')
+    for parent,child in [('odom','base_footprint'),('base_footprint','base_link'),('base_link','laser'),('base_link','camera_link')]:
+        report(buffer.can_transform(parent,child,rospy.Time(0)), 'TF '+parent+' -> '+child)
+    for topic in ['/camera/rgb/image_raw','/camera/depth/image_raw']:
+        frame=streams.get(topic,('',None))[0]
+        report(bool(frame) and buffer.can_transform('base_link',frame,rospy.Time(0)),'Optical TF for '+topic)
+    if streams.get('/camera/depth/image_raw',('',None))[0]=='camera_color_optical_frame':
+        print('OK    Depth registered to color optical frame')
+    else:print('WARN  Unregistered depth requires explicit intrinsics and optical TF')
+    if not buffer.can_transform('map','odom',rospy.Time(0)):
+        print('WARN  map -> odom absent; no live SLAM map')
+    if path:
+        report(check_calibration(path)==0,'Installation values and one publisher match configuration')
+    for subscriber in subscribers:subscriber.unregister()
+    return 1 if failures else 0
+
+
 if __name__=='__main__':
     rospy.init_node('bagtools_tf_check',anonymous=True)
     try:
+        if len(sys.argv)==3 and sys.argv[1]=='--preflight':
+            raise SystemExit(check_inputs(None if sys.argv[2]=='-' else sys.argv[2]))
         if len(sys.argv)==3 and sys.argv[1]=='--calibration':
             raise SystemExit(check_calibration(sys.argv[2]))
         buffer=tf2_ros.Buffer(); listener=tf2_ros.TransformListener(buffer)
