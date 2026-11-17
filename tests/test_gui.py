@@ -113,6 +113,10 @@ while True:
         self.assertEqual(v._export_rgb.getpixel((5, 20)), (0, 0, 0))
         v.var_boxes.set(True);v.var_points.set(True);v._redraw_semantic();v.export_combo()
         self.assertEqual(len(list((self.folder/'exports').glob('*_yolo26s.png'))), 1)
+        # Runs using the same model and time must not overwrite each other's exports.
+        v._last['semantic']['run_id']='trial_B1';v.export_combo()
+        v._last['semantic']['run_id']='trial_C2';v.export_combo()
+        self.assertEqual(len(list((self.folder/'exports').glob('*_trial_*.png'))),2)
         v.semantic_picker.current(0);v._select_semantic()
         self.pump(lambda:not v._last.get('semantic'))
         self.assertEqual(v.world, 'base')

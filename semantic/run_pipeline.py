@@ -43,7 +43,7 @@ def main():
         sources=[dict(path=p, size=os.path.getsize(p), mtime=os.path.getmtime(p)) for p in sources],
         source_fingerprint_kind='size_mtime; not content checksum', stages=[],
         code_sha256={n:digest(os.path.join(HERE, n)) for n in
-                     ['run_pipeline.py','extract_frames.py','sampling.py','pose.py','detect_project.py','cluster_objects.py']})
+                     ['run_pipeline.py','extract_frames.py','sampling.py','pose.py','depth_projection.py','detect_project.py','cluster_objects.py']})
     def save():
         path = os.path.join(out, 'run.json')
         with open(path+'.tmp', 'w') as f: json.dump(manifest, f, indent=2)
@@ -107,6 +107,7 @@ def main():
             paths.append(candidate)
             manifest['geometry_sha256'] = {p:digest(p) for p in paths}
         run('detect', [python, os.path.join(HERE,'detect_project.py'), out, '--backend', backend,
+                      '--projection',os.environ.get('PROJECTION','center'),
                       '--conf', os.environ.get('CONF','0.25')], env=clean_env)
         cluster = [sys.executable, os.path.join(HERE,'cluster_objects.py'), out,
             '--radius', os.environ.get('RADIUS','0.6'), '--min-hits', os.environ.get('MIN_HITS','3')]
@@ -114,6 +115,8 @@ def main():
         if linked and sampling['world_frame'] == 'map':
             cluster += ['--map', linked['yaml']]; manifest['background'] = linked['yaml']
         if os.environ.get('CLASSES'): cluster += ['--classes', os.environ['CLASSES']]
+        for envkey, flag in [('MIN_DURATION','--min-duration'),('MIN_VIEW_BASELINE','--min-view-baseline'),('MIN_VIEW_ANGLE','--min-view-angle'),('ASSOCIATION','--association')]:
+            if os.environ.get(envkey):cluster += [flag,os.environ[envkey]]
         run('fuse_render', cluster)
         if any(os.path.getsize(s['path'])!=s['size'] or os.path.getmtime(s['path'])!=s['mtime'] for s in manifest['sources']):
             raise ValueError('Source bags changed during analysis')

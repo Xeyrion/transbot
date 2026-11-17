@@ -1384,7 +1384,7 @@ class BagViewer(tk.Toplevel):
         out_dir = os.path.join(self.folder, 'exports')
         if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
-        suffix = '_'+semantic['model'] if semantic else ''
+        suffix = '_'+os.path.basename(semantic.get('run_id',semantic['model'])) if semantic else ''
         out = os.path.join(out_dir, '%s_t%05.1f%s.png' % (bag[:-4], d.get('t', 0), suffix))
         canvas.save(out)
         self.var_info.set(tr('已导出 ') + out)

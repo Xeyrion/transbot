@@ -24,7 +24,24 @@ def dist(a, b):
     return math.sqrt((a['x']-b['x'])**2+(a['y']-b['y'])**2+(a.get('z',0)-b.get('z',0))**2)
 
 
-def cluster(points, radius):
+def compatible(a,b,radius,association='point'):
+    if association=='instance':
+        if a['frame']==b['frame'] and a.get('observation_id')!=b.get('observation_id'):
+            # Separated co-visible boxes cannot vote for one instance.
+            if 'bbox_xywh' not in a or 'bbox_xywh' not in b:
+                raise ValueError('Instance association requires observation bounding boxes')
+            ax,ay,aw,ah=a['bbox_xywh'];bx,by,bw,bh=b['bbox_xywh']
+            area=max(0,min(ax+aw,bx+bw)-max(ax,bx))*max(0,min(ay+ah,by+bh)-max(ay,by))
+            iou=float(area)/max(1,aw*ah+bw*bh-area)
+            if iou<.5:return False
+        if a.get('label')=='chair' and b.get('label')=='chair':
+            # Chair back/seat height changes are allowed; horizontal neighbours
+            # still need close support and may not violate co-visibility.
+            return ((a['x']-b['x'])/radius)**2+((a['y']-b['y'])/radius)**2+((a['z']-b['z'])/.8)**2<=1.
+    return dist(a,b)<=radius
+
+
+def cluster(points, radius, association='point'):
     """Complete-link groups: every pair stays within radius; no transitive bridges."""
     if radius <= 0:
         raise ValueError('radius must be positive')
@@ -41,7 +58,7 @@ def cluster(points, radius):
             for j in range(len(points)):
                 if used[j]:
                     continue
-                if all(dist(points[j], points[k]) <= radius for k in group):
+                if all(compatible(points[j],points[k],radius,association) for k in group):
                     group.append(j)
                     used[j] = True
                     changed = True
@@ -49,11 +66,33 @@ def cluster(points, radius):
     return groups
 
 
+def view_support(points, min_duration=0., min_baseline=0., min_angle=0.):
+    """Require temporal and viewpoint evidence when requested, independent of FPS."""
+    duration = max(p['t'] for p in points)-min(p['t'] for p in points) if points else 0.
+    baseline = angle = 0.
+    if min_baseline or min_angle:
+        if not all('camera_xyz' in p and 'view_direction' in p for p in points):
+            return False, dict(reason='missing_view_metadata', duration_s=duration)
+        for i, a in enumerate(points):
+            for b in points[i+1:]:
+                baseline=max(baseline, math.sqrt(sum((x-y)**2 for x,y in zip(a['camera_xyz'],b['camera_xyz']))))
+                av,bv=a['view_direction'],b['view_direction']
+                norm=math.sqrt(sum(v*v for v in av)*sum(v*v for v in bv))
+                if norm>0:
+                    angle=max(angle,math.degrees(math.acos(max(-1.,min(1.,sum(x*y for x,y in zip(av,bv))/norm)))))
+    enough_view = not (min_baseline or min_angle) or (min_baseline>0 and baseline>=min_baseline) or (min_angle>0 and angle>=min_angle)
+    return duration>=min_duration and enough_view, dict(duration_s=duration,baseline_m=baseline,angle_deg=angle)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('frames_dir')
     ap.add_argument('--radius', type=float, default=0.6, help='同一物体的归并半径（米）')
     ap.add_argument('--min-hits', type=int, default=3, help='少于这么多次观测就丢掉')
+    ap.add_argument('--min-duration', type=float, default=0.)
+    ap.add_argument('--min-view-baseline', type=float, default=0.)
+    ap.add_argument('--min-view-angle', type=float, default=0.)
+    ap.add_argument('--association',choices=('point','instance'),default='point')
     ap.add_argument('--classes', default='',
                     help='只保留这些类别，逗号分隔（如 chair,dining table,laptop,tv）；'
                          '空=全部。COCO 在陌生场景会误检 airplane/hot dog 这类，白名单能直接滤掉')
@@ -62,7 +101,7 @@ def main():
                     help='地图 yaml（.mapping.yaml 或 map_*.yaml），画在物体底下当背景')
     ap.add_argument('--include-dynamic',action='store_true',help='Explicitly allow moving-class observations in a static object map')
     args = ap.parse_args()
-    if args.radius <= 0 or args.min_hits < 1:
+    if args.radius <= 0 or args.min_hits < 1 or min(args.min_duration,args.min_view_baseline,args.min_view_angle)<0:
         ap.error('radius and min-hits must be positive')
 
     data = json.load(open(os.path.join(args.frames_dir, 'observations.json')))
@@ -84,8 +123,9 @@ def main():
         by_label.setdefault(o['label'], []).append(o)
 
     objects = []
+    rejected_groups = []
     for label, items in sorted(by_label.items()):
-        for group in cluster(items, args.radius):
+        for group in cluster(items, args.radius,args.association):
             # One frame contributes at most one vote to an instance.
             per_frame = {}
             for i in group:
@@ -95,6 +135,11 @@ def main():
                     per_frame[item['frame']] = item
             pts = [per_frame[k] for k in sorted(per_frame)]
             if len(pts) < args.min_hits:
+                rejected_groups.append(dict(label=label,reason='insufficient_frames',frames=sorted(per_frame),observations=[p.get('observation_id') for p in pts]))
+                continue
+            supported, support=view_support(pts,args.min_duration,args.min_view_baseline,args.min_view_angle)
+            if not supported:
+                rejected_groups.append(dict(label=label,reason='insufficient_time_or_view',frames=sorted(per_frame),support=support,observations=[p.get('observation_id') for p in pts]))
                 continue
             weights=[max(.01,p['score'])/max(.02,p.get('depth_quality',{}).get('sigma_m',.1))**2 for p in pts]
             total=sum(weights)
@@ -108,6 +153,7 @@ def main():
                                 score=round(sum(p['score'] for p in pts) / len(pts), 2),
                                 spread=round(spread, 2),
                                 frames=sorted(set(p['frame'] for p in pts)),
+                                view_support=support,
                                 observations=[p.get('observation_id',str(p['frame'])) for p in pts],
                                 position_semantics='weighted visible surface samples; not object centre'))
     objects.sort(key=lambda o: (o['label'], -o['hits']))
@@ -118,6 +164,9 @@ def main():
         json.dump(dict(schema_version=2, world_frame=data.get('world_frame'),
                        geometry=data.get('geometry'),radius=args.radius, min_hits=args.min_hits,
                        excluded_dynamic=len(excluded_dynamic),fusion='complete_link_3d_frame_dedup',
+                       association=args.association,
+                       support_policy=dict(min_duration_s=args.min_duration,min_baseline_m=args.min_view_baseline,min_angle_deg=args.min_view_angle),
+                       rejected_groups=rejected_groups,
                        frames=data['frames'], objects=objects), f, indent=1)
 
     print('%-12s %5s %7s %7s %7s %6s' % ('类别', '次数', 'x', 'y', '散布', '置信'))

@@ -121,6 +121,19 @@ class SemanticReplayTests(unittest.TestCase):
 
         self.assertEqual(label_size(OldPillowDraw(), 'chair'), (34, 12))
 
+    def test_saved_instance_mask_overlay_uses_the_native_grid(self):
+        from PIL import Image, ImageDraw
+        mask=Image.new('L',(120,80));ImageDraw.Draw(mask).rectangle((10,20,20,25),fill=255)
+        path=self.root/'mask.png';mask.save(str(path))
+        det=dict(self.load().payload(self.load().nearest(10.))['detections'][0],mask=str(path))
+        source=Image.new('RGB',(120,80))
+        image=draw_detections(source,[det])
+        self.assertNotEqual(image.getpixel((15,23)),(0,0,0))
+        self.assertEqual(source.getpixel((15,23)),(0,0,0))
+        Image.new('L',(60,40)).save(str(path))
+        with self.assertRaisesRegex(ValueError,'dimensions differ'):
+            draw_detections(source,[det])
+
 
 if __name__ == '__main__':
     unittest.main()

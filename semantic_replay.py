@@ -44,7 +44,8 @@ def discover_runs(bag_path, root):
                 continue
             validate_sources(run, bag_path)
             model = os.path.splitext(os.path.basename(run.get('model', {}).get('path') or 'model'))[0]
-            found.append(dict(path=os.path.dirname(path), label=model+' | '+os.path.basename(os.path.dirname(path))))
+            title = run.get('display_label_en') if os.environ.get('BAGTOOLS_LANG','').startswith('en') else run.get('display_label')
+            found.append(dict(path=os.path.dirname(path), label=title or model+' | '+os.path.basename(os.path.dirname(path))))
         except (IOError, OSError, ValueError, KeyError, TypeError):
             continue
     return found
@@ -127,7 +128,7 @@ class SemanticReplay(object):
         return self.samples[j] if abs(self.times[j]-record) <= max_age else None
 
     def payload(self, sample):
-        return dict(model=self.model, sample=sample['id'] if sample else None,
+        return dict(model=self.model, run_id=self.run.get('run_id',os.path.basename(self.folder)), sample=sample['id'] if sample else None,
                     detections=self.detections.get(sample['id'], []) if sample else [],
                     objects=self.objects, world=self.world)
 
@@ -145,6 +146,16 @@ def draw_detections(image, detections, show_other=False, labels=True):
     """Native image coordinates; PIL default font remains compatible with py2."""
     from PIL import ImageDraw
     image = image.convert('RGB').copy()
+    if labels:
+        from PIL import Image
+        for det in detections:
+            if det.get('mask') and (show_other or det.get('included',True)):
+                with Image.open(det['mask']) as saved:
+                    mask=saved.convert('L')
+                if mask.size!=image.size:
+                    raise ValueError('Instance mask and RGB image dimensions differ')
+                alpha=mask.point(lambda v: int(v*.22))
+                image.paste(Image.new('RGB',image.size,COLORS[det['status']]),(0,0),alpha)
     draw = ImageDraw.Draw(image)
     for det in detections:
         if not show_other and not det.get('included', True):
@@ -154,8 +165,11 @@ def draw_detections(image, detections, show_other=False, labels=True):
         for offset in (0, 1):
             draw.rectangle((x+offset, y+offset, x+w-offset, y+h-offset), outline=color)
         if labels:
+            reasons={'insufficient_valid_depth':'few depth','mixed_depth':'mixed depth',
+                     'insufficient_surface_support':'split depth','ambiguous_surfaces':'ambiguous',
+                     'no_connected_surface':'no surface','missing_instance_mask':'no mask'}
             tag = ('#%d' % det['object_number'] if det.get('object_number') else
-                   'D+' if det.get('projection') == 'accepted' else 'no depth')
+                   'D+' if det.get('projection') == 'accepted' else reasons.get(det.get('reason'),'no depth'))
             text = '%s %.2f %s' % (det['label'], det['score'], tag)
             if det.get('depth_m') is not None:
                 text += ' %.2fm' % det['depth_m']

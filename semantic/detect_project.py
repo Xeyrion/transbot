@@ -20,7 +20,8 @@ import os
 
 import numpy as np
 from PIL import Image
-from camera_geometry import undistort
+from depth_projection import project_depth
+import hashlib
 
 MODELS = os.environ.get('SEMANTIC_MODELS',
                         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'))
@@ -81,44 +82,35 @@ class Ultralytics(object):
         self.conf = conf
 
     def __call__(self, bgr):
-        result = self.model(bgr, conf=self.conf, verbose=False)[0]
+        result = self.model(bgr, conf=self.conf, retina_masks=True, verbose=False)[0]
         names = result.names
         out = []
-        for box in result.boxes:
+        for index, box in enumerate(result.boxes):
             x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
-            out.append((names[int(box.cls)], float(box.conf),
-                        int(x1), int(y1), int(x2 - x1), int(y2 - y1)))
+            record = dict(label=names[int(box.cls)], score=float(box.conf),
+                          bbox_xywh=[int(x1), int(y1), int(x2-x1), int(y2-y1)])
+            if result.masks is not None:
+                mask = result.masks.data[index].cpu().numpy() > .5
+                if mask.shape != bgr.shape[:2]:
+                    raise ValueError('Model mask is not at native RGB resolution')
+                record['_mask'] = mask
+            out.append(record)
         return out
 
 
 # ---------------------------------------------------------------- 投影
 def project(depth, k, m, x, y, bw, bh, max_range=8.0, distortion=None, details=False):
-    """框中心附近取深度中位数，反投影成 map 坐标。"""
-    h, w = depth.shape[:2]
-    u0, u1 = max(0, x + bw // 4), min(w, x + 3 * bw // 4)
-    v0, v1 = max(0, y + bh // 4), min(h, y + 3 * bh // 4)
-    if u1 <= u0 or v1 <= v0 or not (0 <= x+bw/2.0 < w and 0 <= y+bh/2.0 < h):
+    result = project_depth(depth,k,m,[x,y,bw,bh],distortion=distortion,max_range=max_range)
+    if result['point'] is None:
         return None
-    patch = depth[v0:v1, u0:u1]
-    valid = patch[(patch > 0.2) & (patch < max_range)]
-    if valid.size < 10 or float(valid.size)/max(1,patch.size)<.25:
-        return None
-    z = float(np.median(valid))
-    mad=float(np.median(np.abs(valid-z)))
-    if mad>max(.1,.1*z): return None
-    mask=np.isfinite(patch)&(patch>.2)&(patch<max_range)&(np.abs(patch-z)<=max(.03,3*1.4826*mad))
-    rows,cols=np.nonzero(mask)
-    if len(rows)<10 or float(len(rows))/valid.size<.7: return None
-    cu,cv_=float(np.median(cols))+u0,float(np.median(rows))+v0
-    rx,ry=undistort((cu-k[2])/k[0],(cv_-k[5])/k[4],distortion)
-    if not np.isfinite(rx) or not np.isfinite(ry): return None
-    p = [float(rx)*z,float(ry)*z,z]
-    result=[sum(m[i][j] * p[j] for j in range(3)) + m[i][3] for i in range(3)] + [z]
-    quality=dict(depth_mad_m=mad,valid_fraction=float(valid.size)/patch.size,
-                 support_pixels=len(rows),sigma_m=max(.02,1.4826*mad),
-                 uncertainty_scope='depth_dispersion_only; excludes calibration and pose error',
-                 position_semantics='visible_surface_sample; not object centre')
-    return (result,quality) if details else result
+    return (result['point'],result['quality']) if details else result['point']
+
+
+def sha256(path):
+    h=hashlib.sha256()
+    with open(path,'rb') as f:
+        for block in iter(lambda:f.read(1048576),b''):h.update(block)
+    return h.hexdigest()
 
 
 def main():
@@ -127,13 +119,19 @@ def main():
     ap.add_argument('--backend', choices=('yolo26', 'cv2'), default='yolo26')
     ap.add_argument('--conf', type=float, default=0.25)
     ap.add_argument('--out', default=None)
+    ap.add_argument('--projection', choices=('center','surface','mask-surface'), default='center')
+    ap.add_argument('--predictions', help='Reuse a validated predictions.json without running a model')
     args = ap.parse_args()
 
     sampling_path = os.path.join(args.frames_dir, 'sampling.json')
     sampling = json.load(open(sampling_path)) if os.path.isfile(sampling_path) else None
     if sampling and sampling['state'] != 'complete':
         raise ValueError('Refusing incomplete/failed frame extraction')
-    detect = Ultralytics(args.conf) if args.backend == 'yolo26' else Darknet(args.conf)
+    cached=json.load(open(args.predictions)) if args.predictions else None
+    if cached and args.conf < cached.get('confidence_floor',0.):
+        raise ValueError('Cached detections do not cover the requested lower confidence threshold')
+    detect=None if cached else (Ultralytics(args.conf) if args.backend == 'yolo26' else Darknet(args.conf))
+    predictions=dict(schema_version=1,confidence_floor=args.conf,frames={})
     obs = []
     detections=[]
     frames = sorted(glob.glob(os.path.join(args.frames_dir, '[0-9][0-9][0-9][0-9]')))
@@ -152,31 +150,69 @@ def main():
         if world is not None and current_world != world:
             raise ValueError('Mixed world coordinate systems')
         world, geometry = current_world, meta.get('geometry')
-        for label, score, x, y, bw, bh in detect(bgr):
-            record=dict(label=label,score=float(score),bbox_xywh=[x,y,bw,bh],frame=i,source_frame=os.path.basename(frame_dir))
-            detections.append(record)
-            projected = project(depth,k,m,x,y,bw,bh,distortion=meta.get('distortion_rgb'),details=True)
-            if projected is None:
-                record.update(projection='rejected',reason='depth_support_spread_or_invalid_ray')
+        frame_id=os.path.basename(frame_dir)
+        image_sha=sha256(os.path.join(frame_dir,'rgb.png'))
+        if cached:
+            saved=cached['frames'][frame_id]
+            if saved['rgb_sha256']!=image_sha or abs(saved['rgb_record']-meta['rgb_record'])>1e-6:
+                raise ValueError('Cached predictions belong to a different RGB frame: '+frame_id)
+            found=saved['detections']
+        else:
+            found=detect(bgr)
+        saved_detections=[]
+        for index, raw in enumerate(found):
+            if not isinstance(raw,dict):
+                label,score,x,y,bw,bh=raw
+                raw=dict(label=label,score=float(score),bbox_xywh=[x,y,bw,bh])
+            raw=dict(raw);mask=raw.pop('_mask',None)
+            if mask is not None:
+                mask_dir=os.path.join(args.frames_dir,'masks');os.makedirs(mask_dir,exist_ok=True)
+                raw['mask']=os.path.join(mask_dir,'%s_%03d.png'%(frame_id,index))
+                Image.fromarray(mask.astype(np.uint8)*255).save(raw['mask'])
+                raw['mask_sha256']=sha256(raw['mask'])
+            elif raw.get('mask'):
+                if sha256(raw['mask'])!=raw['mask_sha256']:raise ValueError('Cached instance mask changed')
+                mask=np.asarray(Image.open(raw['mask']).convert('L'))>0
+            saved_detections.append(raw)
+            label,score=raw['label'],raw['score']
+            if score < args.conf:
                 continue
-            p,quality=projected
-            obs.append(dict(label=label, score=round(score, 3), t=round(meta['stamp'], 3),
-                            x=round(p[0], 3), y=round(p[1], 3), z=round(p[2], 3),
-                            dist=round(p[3], 2), frame=i,
-                            source_frame=os.path.basename(frame_dir),
-                            depth_stamp=meta.get('depth_stamp'), pair_delta_ms=meta.get('pair_delta_ms')))
+            record=dict(raw,frame=i,source_frame=frame_id)
+            detections.append(record)
+            result=project_depth(depth,k,m,raw['bbox_xywh'],mode=args.projection,
+                                 instance_mask=mask,distortion=meta.get('distortion_rgb'))
+            record['depth_diagnostics']=result['quality']
+            if result['point'] is None:
+                record.update(projection='rejected',reason=result['reason'])
+                continue
+            p,quality=result['point'],result['quality']
+            obs.append(dict(label=label, score=round(score,3), t=round(meta['stamp'],3),
+                            x=round(p[0],3), y=round(p[1],3), z=round(p[2],3),
+                            dist=round(p[3],2), frame=i,source_frame=frame_id,
+                            depth_stamp=meta.get('depth_stamp'),pair_delta_ms=meta.get('pair_delta_ms'),
+                            camera_xyz=[m[j][3] for j in range(3)],
+                            bbox_xywh=raw['bbox_xywh'],
+                            view_direction=[m[j][2] for j in range(3)]))
             obs[-1]['depth_quality']=quality
-            obs[-1]['observation_id']='%s:%d'%(os.path.basename(frame_dir),len(obs))
+            obs[-1]['observation_id']='%s:%d'%(frame_id,len(obs))
             record.update(projection='accepted',observation_id=obs[-1]['observation_id'])
+        predictions['frames'][frame_id]=dict(rgb_sha256=image_sha,rgb_record=meta['rgb_record'],detections=saved_detections)
         if (i + 1) % 20 == 0:
             print('  已处理 %d/%d 帧，累计 %d 个观测' % (i + 1, len(frames), len(obs)))
 
+    if not cached:
+        with open(os.path.join(args.frames_dir,'predictions.json'),'w') as f:json.dump(predictions,f,indent=1)
     out = args.out or os.path.join(args.frames_dir, 'observations.json')
+    policy=dict(method=args.projection,min_valid_fraction=.25)
+    if args.projection=='center':
+        policy.update(min_surface_support=.7,max_mad_m='max(0.1,0.1*z)')
+    else:
+        policy.update(min_connected_support_fraction=.2,depth_bin_m=.08,
+                      band_half_width_m='max(0.08,0.04*z)',max_competing_support_ratio=.8)
     with open(out, 'w') as f:
         json.dump(dict(schema_version=2, world_frame=world, geometry=geometry,
                        frames=len(frames), backend=args.backend, observations=obs,detections=detections,
-                       depth_policy=dict(min_valid_fraction=.25,min_surface_support=.7,
-                                         max_mad_m='max(0.1,0.1*z)')), f, indent=1)
+                       depth_policy=policy), f, indent=1)
     kinds = {}
     for o in obs:
         kinds[o['label']] = kinds.get(o['label'], 0) + 1
