@@ -1,130 +1,84 @@
 # Transbot
 
-Yahboom Transbot 履带机器人（ROS 1 Melodic）上的两个项目：PC 端遥控台，以及 2R 机械臂的建模、仿真与真机同步。
+Yahboom Transbot 履带机器人的语义建图、遥控、机械臂与墙面任务项目，基于 ROS 1 Melodic。
 
 **中文** ｜ [English](README.en.md)
 
-![ROS Melodic](https://img.shields.io/badge/ROS-Melodic-blue) ![Python](https://img.shields.io/badge/Python%203%20%7C%202-green) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
+## 项目入口
 
-![实机演示](arm/screenshots/arm-demo.gif)
+| 项目 | 目录 | 当前范围 |
+|---|---|---|
+| **语义建图工作台** | [semantic_mapping/](semantic_mapping/README.md) | 多模态录制、校验回传、二维建图、RGB-D 语义定位与回放；第一阶段演示完成 |
+| PC 遥控台 | [console/](console/README.md) | 底盘、外设、机械臂、相机及建图导航 |
+| 2R 机械臂 | [arm/](arm/README.md) | 实测运动学、Gazebo 仿真与真机同步 |
+| 墙面任务台 | [wall_task/](wall_task/README.md) | 导航、对准与竖线规划；完整画线流程仍待真机验证 |
 
-*左边笔记本上跑 Gazebo 控制面板，右边真机 2R 臂夹着马克笔同步到同一组角度。*
+各项目独立启动。语义建图的阶段完成范围和后续研究见[阶段总结](semantic_mapping/docs/stage_01.md)。
 
-## 项目
+## 语义建图工作台
 
-两个子项目互相独立，共用同一套几何参数与关节限位。
+**Transbot Semantic Mapping Studio** 已贯通采集 → 数据检查 → 地图重建 → 物品识别与定位 → 语义回放 → 最终地图导出。常用方案为 YOLO26s 与 YOLO26s 分割，结果按录制会话管理。
 
-### `console/` — PC 端遥控台
+```bash
+cd ~/transbot/semantic_mapping
+bash run.sh       # 中文
+bash run_en.sh    # English
+```
 
-| 云台与机械臂 | 系统状态 |
+源码与大数据分开：本机 `paths.local.json` 引用现有 bag 与模型位置，数据保持原处。仓库不包含原始包、标注数据集、模型权重和批量生成结果。初次配置见[项目说明](semantic_mapping/README.md#源码与数据分开)。
+
+## 其他入口
+
+```bash
+# PC 遥控台
+cd ~/transbot/console
+source env.sh
+bash tasks/00-health-check.sh
+bash run_gui.sh
+
+# 机械臂仿真：独立本机 ROS master
+cd ~/transbot/arm
+bash gazebo/run_simple.sh
+
+# 墙面任务台：离线预览
+cd ~/transbot/wall_task/task_gui
+bash start_task.sh --offline
+```
+
+![机械臂实机演示](arm/screenshots/arm-demo.gif)
+
+![墙面任务导航演示](wall_task/navigation-demo.gif)
+
+## 运行分工
+
+| 环境 | 职责 |
 |---|---|
-| ![云台与机械臂](console/docs/images/gui-arm.png) | ![系统状态](console/docs/images/gui-status.png) |
+| Windows 主机 | 开发、源码管理、标注及演示材料 |
+| Ubuntu 控制机 | GUI、数据回传、离线地图与语义算法、导航规划、Gazebo |
+| Jetson 机器人 | 硬件驱动、雷达与相机数据、里程计、机器人本地录制 |
 
-六页签 tkinter 控制台，通过 WiFi 接管整台机器人：
+底盘和雷达串口设备只能由机器人端驱动访问。控制机通过 ROS/SSH 使用数据和下发命令；机器人离线时仍可在控制机分析已有数据。
 
-- **底盘** —— 单次指令 + 20 Hz 连续速度，松键或超时自动刹车
-- **外设** —— 灯带六种特效、蜂鸣、云台、雷达避障 / 跟随 / 警戒、黑线巡游
-- **机械臂** —— 三个关节滑块，配 `/CurrentAngle` 角度回读
-- **视觉** —— Astra RGB 与深度在机器人端取流，PC 端显示
-- **建图导航** —— 图形界面远程启停机器人端的 gmapping / move_base，地图可保存、拉取、备份
-- **找机器人** —— `env.sh` 按热点 / 路由器 / mDNS 自动解析地址，机器人离线时界面仍可打开
-- **免 catkin** —— 内置官方 `transbot_msgs` 预编译模块，新机器只要 ROS Melodic + `python3-tk`
+## 目录约定
 
-详细用法见 [`console/README.md`](console/README.md)。
-
-### `arm/` — 2R 机械臂建模与仿真
-
-![面板与三维视图](arm/screenshots/panel_and_3d_zh.png)
-
-Gazebo 里的平面 2R 机械臂，配一个控制面板：
-
-- 两个滑块就是两个关节角，右侧实时侧视图给出 `e1 / rel / e2` 与笔尖坐标
-- 给定距离和 z 起止，规划一条竖线并按雅可比步进下发
-- 通过 UDP agent 把同一组角度同步到真机舵机，带慢速流与笛卡尔闭环
-- `line_tool.py` 是纯计算的运动学：FK / IK / 可达范围 / 直线规划
-- **实测几何** —— L1、L2、j7 轴位置全部按钢卷尺重标；厂家 URDF 差 1.72cm，照它算笔尖会偏 1~2cm
-
-详细用法见 [`arm/README.md`](arm/README.md)。
-
-## 双机架构
-
-运行环境由两台独立计算机组成，职责不可互换。
-
-| | 控制 PC | 机器人主板 |
-|---|---|---|
-| 架构 / 系统 | x86_64，Ubuntu 18.04 | aarch64，Jetson Nano / L4T (JetPack 4.5) |
-| SSH 用户 | 本机账号 | `jetson` |
-| 资源 | `console/`、`arm/` 仿真、rviz | `/dev/ttyTHS1`、`/dev/rplidar`、`/scan`、`/odom` |
-| 职责 | 遥控、可视化、Gazebo | 底盘驱动、雷达、建图、导航 |
-
-依赖串口设备的组件（底盘驱动、雷达、建图、导航）只能在主板上运行。
-`console/` 仅发布话题与做可视化；`arm/` 的 Gazebo 场景运行在 PC 端，通过 UDP agent 与真机同步。
-
-## 快速开始
-
-```bash
-git clone https://github.com/Xeyrion/transbot.git
-cd transbot
-
-# 遥控台
-cd console
-source ./env.sh                 # 自动发现机器人，设置 ROS_MASTER_URI / ROS_IP
-bash tasks/00-health-check.sh   # 全绿再往下
-bash run_gui.sh                 # 图形控制台
-
-# 机械臂仿真（独立的本机 ROS master，不影响机器人）
-cd ../arm
-./gazebo/run_simple.sh
-```
-
-固定机器人 IP（可选，热点模式默认 `192.168.1.11`）：
-
-```bash
-mkdir -p ~/.config && echo 'ROBOT_IP=<robot-ip>' > ~/.config/transbot_console.conf
-```
-
-## 目录
-
-```
+```text
 transbot/
-├── console/              PC 端遥控台
-│   ├── transbot_gui.py     6 页签 tkinter 控制台
-│   ├── env.sh              机器人地址发现 + ROS 环境
-│   ├── run_gui.sh          启动器（预检 + master 探测）
-│   ├── scripts/            键盘遥控 / 机械臂自检 / 外设演示
-│   ├── tasks/              00~10 一键入口
-│   ├── docs/               setup / advanced / benchmark
-│   ├── examples/arm_min/   /TargetAngle 最小示例（三级递进）
-│   ├── maps/  rviz/        示例地图与 RViz 配置
-│   └── vendor/             预编译 transbot_msgs（免 catkin）
-└── arm/                  机械臂建模与仿真
-    ├── gazebo/             Gazebo 2R 场景 + 控制面板
-    ├── robot_side/         UDP ↔ ROS 桥（跑在真机侧）
-    ├── line_tool.py        2R 运动学 / 可达范围 / 直线规划
-    ├── draw_line.py        命令行画线
-    ├── CALIBRATION.md      实测标定记录
-    └── tests/              18 项单元测试
+  semantic_mapping/   语义建图工作台源码、文档与测试
+  console/            PC 遥控台
+  arm/                机械臂建模与仿真
+  wall_task/          墙面任务台
+  docs/               项目导航及仓库约定
+  _local/             本机资料、工具缓存与归档，不上传
 ```
 
-## 关节限位
+本机旧 `bagtools/` 若仍存在，仅保存原位置的数据、模型、结果或历史 Git 备份，不是新版启动目录；不要移动其中的原始数据。控制机数据仍在 `~/robot_research/bagtools/`，由新项目本机配置引用。
 
-| 关节 | 舵机 ID | 范围 |
-|---|---|---|
-| 底座 j7 | 7 | 0–225° |
-| 升降 j8 | 8 | 15–240° |
-| 夹爪 j9 | 9 | 60–180°（夹笔实测 158–160°） |
+源码及当前说明由 Git 管理。提交前用 `git status` 核对范围；大数据、运行产物、本机配置与工具缓存均忽略。子项目原有记录与 Transbot 历史一起保留，不再在源码目录中嵌套独立仓库。
 
-控制台、遥控脚本、UDP agent 与示例共用这一组值。驱动本身不校验角度，这层保护在发送端。
+## 环境与硬件参数
 
-## 环境
+控制机为 Ubuntu 18.04 / ROS Melodic；机器人为 Jetson Nano / JetPack 4.5。语义工作台的 GUI 使用 Python 3，ROS bag 读取使用 Python 2，YOLO 在独立 Conda 环境运行，具体依赖见各项目说明。
 
-- Ubuntu 18.04 + ROS Melodic（控制 PC 与机器人主板各一台，机器人侧为 Jetson Nano / JetPack 4.5）
-- `python3-tk`、`rospy`、`opencv-python`、`numpy`、`Pillow`、`cv_bridge`，见 `console/requirements.txt`
-- 机器人与 PC 在同一 WiFi（机器人热点或同一路由器）
-- 建图 / 导航 / 雷达 / 巡线依赖厂家 `transbot_nav`、`transbot_laser`、`transbot_linefollow`，这些跑在机器人端
+机械臂使用实测几何及统一关节限位：j7 为 0–225°，j8 为 15–240°，j9 为 60–180°。详见 [arm/CALIBRATION.md](arm/CALIBRATION.md)。
 
-`arm/tests` 18 项单元测试；`console/` 全部脚本通过 `bash -n` 与 `py_compile`（Ubuntu 18.04 / Python 3.6.9）。
-
-## License
-
-MIT，见 [`LICENSE`](LICENSE)。
+MIT License，见 [LICENSE](LICENSE)。

@@ -106,7 +106,7 @@ class App(object):
         self.stop_flag = False
         self._photo = None
 
-        root.title(tr('Bag 质量看板'))
+        root.title(tr('Transbot 数据与语义地图'))
         root.configure(bg=BG)
         # 直接最大化：写死 1320x780 在小屏上会被 WM 压扁，列宽又是固定的，
         # 结果就是挤成一团。最大化 + 列宽自适应才稳。

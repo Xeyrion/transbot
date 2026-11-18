@@ -7,9 +7,15 @@ __pycache__/
 *.pgm
 # ...except the sample map shipped with the repo
 !console/maps/*.pgm
+!wall_task/maps/*.pgm
 *.yaml.bak
 *.bag
 *.log
+
+# Old local data storage stays in place after the source-only migration.
+/bagtools/
+/bagfiles/
+/archive/
 /tmp/
 
 # RViz / rqt local state
@@ -32,3 +38,14 @@ _local/
 
 # Local agent workspace / scratch (not part of the project)
 .workbuddy-ai/
+.slidep/
+
+# YOLO weights and training output (large binaries, regenerate from data)
+*.pt
+*.pth
+*.onnx
+*.weights
+*.bag.active
+*.part
+paths.local.json
+runs/
