@@ -378,6 +378,10 @@ class LifecycleTests(unittest.TestCase):
                 for name, body in {
                     'rostopic': '#!/bin/sh\n[ "$1" = list ] && printf "/scan\\n/odom\\n/tf\\n"; exit 0\n',
                     'rosnode': '#!/bin/sh\nexit 0\n',
+                    # These bytes are intentionally not a ROS bag. The fake
+                    # observer/quality reader rejects them without requiring
+                    # Python 2 or ROS on an offline CI runner.
+                    'python2': '#!/bin/sh\nexit 1\n',
                     'rosbag': '#!/usr/bin/env python3\nimport sys,pathlib\nif sys.argv[1]=="record":\n p=pathlib.Path(sys.argv[sys.argv.index("-O")+1]); p.with_name(p.stem+"_0.bag").write_bytes(b"ok")\n '+('p.with_name(p.stem+"_1.bag.active").write_bytes(b"unfinished")' if incomplete else 'pass')+'\n',
                 }.items():
                     p = root/'bin'/name; p.write_text(body); p.chmod(0o755)
@@ -385,6 +389,10 @@ class LifecycleTests(unittest.TestCase):
                            MIN_FREE_GB='0', ROS_IP='127.0.0.1',ROS_MASTER_URI='http://127.0.0.1:1')
                 p = subprocess.run(['bash', str(root/'auto.sh'), '-p', 'nav', '-d', '1', '-o', str(root/'out')],
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
+                folders = list((root/'out').glob('session_*'))
+                self.assertEqual(len(folders), 1, p.stderr.decode('utf-8', 'replace'))
+                self.assertTrue(list(folders[0].glob('*.bag')))
+                self.assertEqual(bool(list(folders[0].glob('*.bag.active'))), incomplete)
                 if incomplete:
                     self.assertNotEqual(p.returncode, 0)
                 else:
@@ -394,7 +402,7 @@ class LifecycleTests(unittest.TestCase):
                                         env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
                     self.assertNotEqual(p2.returncode,0)
                     folders=list((root/'out').glob('session_*'))
-                    self.assertEqual(len(folders),2)
+                    self.assertEqual(len(folders),2,p2.stderr.decode('utf-8','replace'))
                     self.assertTrue(all(list(f.glob('*.bag')) for f in folders))
 
     def test_atomic_lock_and_cancel_during_startup(self):
