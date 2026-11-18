@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""对抽出来的每一帧跑检测，把框投到 map 系，攒成 observations.json。
+"""对抽出来的每一帧跑检测，用深度和相机位姿投到 map/odom 系，攒成 observations.json。
 
     python3 detect_project.py <frames_dir> [--backend yolo26|cv2] [--conf 0.25]
 

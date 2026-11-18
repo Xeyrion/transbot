@@ -923,7 +923,7 @@ class BagViewer(tk.Toplevel):
         more_menu.add_command(label=tr('加载语义结果…'), command=self._load_semantic)
         self.var_map_scale = tk.StringVar()
         tk.Label(semantic_bar, textvariable=self.var_map_scale, bg=BG, fg=DIM).pack(side='left', padx=5)
-        self.var_generation = tk.StringVar()
+        self.var_generation = tk.StringVar(value=tr('栅格底图可选；物品三维定位需要有效深度、相机内外参和机器人位姿。'))
         ttk.Label(self, textvariable=self.var_generation, wraplength=1050).pack(fill='x', padx=12)
         self._set_controls(False)
 
@@ -1195,7 +1195,7 @@ class BagViewer(tk.Toplevel):
             run = {}
         code = self._semantic_proc.poll()
         if code is None:
-            labels = {'sample': tr('正在配对与抽帧'),
+            labels = {'sample': tr('正在配对并检查定位数据'),
                       'detect': tr('正在识别'), 'fuse_render': tr('正在融合并保存')}
             stages = run.get('stages', [])
             stage = stages[-1]['name'] if stages else None
@@ -1215,7 +1215,7 @@ class BagViewer(tk.Toplevel):
             else:
                 text = tr('%s 已生成，可在地图图库查看。') % title
             if run.get('world_frame') == 'odom':
-                text += ' ' + tr('此结果使用里程计坐标。')
+                text += ' ' + tr('此结果使用里程计坐标（odom），位置可能随里程计累计漂移。')
             bounds = (run.get('geometry', {}).get('map') or {}).get('record_bounds') or []
             if any(value is not None for value in bounds):
                 text += ' ' + tr('结果覆盖底图的有效录制片段。')

@@ -153,7 +153,7 @@ def main():
     ap.add_argument('bag'); ap.add_argument('outdir')
     ap.add_argument('--step', type=float, default=1.)
     ap.add_argument('--max', type=int, default=120)
-    ap.add_argument('--all', action='store_true', help='Sample the entire mapped interval')
+    ap.add_argument('--all', action='store_true', help='Sample the entire selected recording interval')
     ap.add_argument('--max-pair-ms', type=float, default=33.)
     ap.add_argument('--root', choices=['map', 'odom'], default=None)
     ap.add_argument('--record-start', type=float)

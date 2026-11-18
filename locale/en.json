@@ -411,7 +411,8 @@
   "显示全部历史结果": "Show all previous runs",
   "语义地图生成失败：": "Semantic map generation failed: ",
   "正在建立底图": "Building base map",
-  "正在配对与抽帧": "Pairing and sampling frames",
+  "正在配对并检查定位数据": "Pairing frames and checking localization data",
+  "栅格底图可选；物品三维定位需要有效深度、相机内外参和机器人位姿。": "The occupancy grid is optional; 3D object localization requires valid depth, camera intrinsics and extrinsics, and robot poses.",
   "正在识别": "Detecting objects",
   "正在融合并保存": "Fusing and saving",
   "正在准备生成": "Preparing generation",
@@ -420,7 +421,7 @@
   "%s 已生成，图库保存失败。可在更多菜单重试最终地图。": "%s complete. Gallery export failed. Retry Final map in More.",
   "选择录制": "Select recording",
   "显示其它识别类别": "Show other detections",
-  "此结果使用里程计坐标。": "This result uses odometry coordinates.",
+  "此结果使用里程计坐标（odom），位置可能随里程计累计漂移。": "This result uses odometry coordinates (odom); positions may drift with accumulated odometry error.",
   "本帧显示 %d 个其它类别框。": "Showing %d other detection boxes in this frame.",
   "本帧没有其它类别的检测框。": "No other classes detected in this frame.",
   "选择语义回放结果后，可查看其它类别的检测框。": "Select a semantic replay result to view other detection boxes."

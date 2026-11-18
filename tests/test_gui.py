@@ -187,7 +187,7 @@ while True:
             self.assertTrue(v.generate_button.instate(['disabled']))
             self.pump(lambda:v._semantic_proc is None)
             self.assertEqual(v.semantic_picker.get(), self.gui.SEMANTIC_PRESETS['yolo26s-seg'])
-            self.assertIn(self.gui.tr('此结果使用里程计坐标。'), v.var_generation.get())
+            self.assertIn(self.gui.tr('此结果使用里程计坐标（odom），位置可能随里程计累计漂移。'), v.var_generation.get())
             self.pump(lambda:v._last.get('semantic_run') == v._semantic_output)
         v.close()
 
