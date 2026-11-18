@@ -27,7 +27,7 @@ import time
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from session_catalog import sessions, bag_names, rename_target
-from semantic_replay import draw_detections, COLORS
+from semantic_replay import draw_detections, discover_runs, read_json, COLORS
 from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_final_map, gallery_recording
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 
@@ -40,6 +40,7 @@ PROBE = os.path.join(HERE, 'bag_quality_probe.py')
 SERVER = os.path.join(HERE, 'bag_viewer_server.py')
 DEFAULT_DIR = os.path.expanduser('~/robot_research/bagtools/bags')
 PREVIEW = '/tmp/bag_quality_preview.ppm'
+SEMANTIC_PRESETS = {'yolo26s': 'YOLO26s', 'b1': 'B1'}
 
 BG = '#eef1f4'
 CARD = '#ffffff'
@@ -785,6 +786,9 @@ class BagViewer(tk.Toplevel):
         self._record_t0 = 0.
         self._semantic_run = None
         self._semantic_choices = []
+        self._semantic_runs = []
+        self._semantic_proc = None
+        self._semantic_poll_job = None
         self._resize_job = self._export_poll_job = None
         self._layout_job=None
         self._layout_initialized=False
@@ -854,36 +858,46 @@ class BagViewer(tk.Toplevel):
         tk.Label(semantic_bar, text=tr('语义回放'), bg=BG, fg=DIM).pack(side='left')
         self.var_semantic = tk.StringVar(value=tr('原始数据'))
         self.semantic_picker = ttk.Combobox(semantic_bar, textvariable=self.var_semantic,
-                                            values=[tr('原始数据')], width=45, state='readonly')
+                                            values=[tr('原始数据')], width=28, state='readonly')
         self.semantic_picker.pack(side='left', padx=6)
         self.semantic_picker.bind('<<ComboboxSelected>>', self._select_semantic)
-        load_semantic = ttk.Button(semantic_bar, text=tr('加载语义结果…'), command=self._load_semantic)
-        load_semantic.pack(side='left', padx=3)
+        self._controls.append(self.semantic_picker)
+        self.generate_button, generate_menu = self._semantic_menu(semantic_bar, tr('生成语义地图'))
+        generate_menu.add_command(label=tr('YOLO26s · 检测框'), command=lambda: self._generate_semantic('yolo26s'))
+        generate_menu.add_command(label=tr('B1 · 分割深度'), command=lambda: self._generate_semantic('b1'))
+        gallery = ttk.Button(semantic_bar, text=tr('地图图库'), command=self.open_gallery)
+        gallery.pack(side='left', padx=3)
+        self._controls.append(gallery)
+
+        _, view_menu = self._semantic_menu(semantic_bar, tr('视图'))
         self.var_boxes = tk.BooleanVar(value=True)
         self.var_points = tk.BooleanVar(value=True)
         self.var_other_classes = tk.BooleanVar(value=False)
-        for text, variable in ((tr('识别框'), self.var_boxes), (tr('物品点'), self.var_points),
-                               (tr('全部类别'), self.var_other_classes)):
-            check = ttk.Checkbutton(semantic_bar, text=text, variable=variable, command=self._redraw_semantic)
-            check.pack(side='left', padx=4)
-            self._controls.append(check)
-        self._controls += [self.semantic_picker, load_semantic]
+        for label, var in ((tr('识别框'), self.var_boxes), (tr('物品点'), self.var_points),
+                           (tr('全部类别'), self.var_other_classes)):
+            view_menu.add_checkbutton(label=label, variable=var, command=self._redraw_semantic)
+        view_menu.add_separator()
+        for label, command in ((tr('均衡布局'), lambda: self.set_layout('balanced')),
+                               (tr('画面优先'), lambda: self.set_layout('rgb')),
+                               (tr('地图优先'), lambda: self.set_layout('map')),
+                               (tr('放大地图'), self.open_map_window),
+                               (tr('缩小地图'), lambda: self.zoom_map(1.25)),
+                               (tr('放大比例'), lambda: self.zoom_map(.8)),
+                               (tr('全图'), self.overview_map), (tr('跟随机器人'), self.follow_map)):
+            view_menu.add_command(label=label, command=command)
 
-        views = tk.Frame(self,bg=BG)
-        views.pack(fill='x',padx=12,pady=3)
-        for text,command in ((tr('均衡布局'),lambda:self.set_layout('balanced')),
-                             (tr('画面优先'),lambda:self.set_layout('rgb')),
-                             (tr('地图优先'),lambda:self.set_layout('map')),
-                             (tr('放大地图'),self.open_map_window),
-                             ('-',lambda:self.zoom_map(1.25)),('+',lambda:self.zoom_map(.8)),
-                             (tr('全图'),self.overview_map),(tr('跟随机器人'),self.follow_map),
-                             (tr('最终地图'),self.open_final_map),(tr('地图图库'),self.open_gallery),
-                             (tr('结果目录'),self.open_results)):
-            button=ttk.Button(views,text=text,command=command,width=3 if text in ('-','+') else 10)
-            button.pack(side='left',padx=2)
-            self._controls.append(button)
-        self.var_map_scale=tk.StringVar()
-        tk.Label(views,textvariable=self.var_map_scale,bg=BG,fg=DIM).pack(side='left',padx=5)
+        _, more_menu = self._semantic_menu(semantic_bar, tr('更多'))
+        more_menu.add_command(label=tr('最终地图'), command=self.open_final_map)
+        more_menu.add_command(label=tr('结果目录'), command=self.open_results)
+        more_menu.add_separator()
+        self.var_all_runs = tk.BooleanVar(value=False)
+        more_menu.add_checkbutton(label=tr('显示全部历史结果'), variable=self.var_all_runs,
+                                 command=self._refresh_semantic_choices)
+        more_menu.add_command(label=tr('加载语义结果…'), command=self._load_semantic)
+        self.var_map_scale = tk.StringVar()
+        tk.Label(semantic_bar, textvariable=self.var_map_scale, bg=BG, fg=DIM).pack(side='left', padx=5)
+        self.var_generation = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_generation, wraplength=1050).pack(fill='x', padx=12)
         self._set_controls(False)
 
         self.var_semantic_note = tk.StringVar()
@@ -1096,17 +1110,105 @@ class BagViewer(tk.Toplevel):
         self.var_semantic_note.set(tr('正在加载语义结果…') if self._semantic_run else '')
         self._force = True
 
+    def _semantic_menu(self, parent, label):
+        button = ttk.Menubutton(parent, text=label)
+        menu = tk.Menu(button, tearoff=False)
+        button.configure(menu=menu)
+        button.pack(side='left', padx=3)
+        self._controls.append(button)
+        return button, menu
+
+    def _refresh_semantic_choices(self, select=None):
+        selected = select or self._semantic_run
+        if self.var_all_runs.get():
+            runs = list(self._semantic_runs)
+        else:
+            runs = []
+            for preset, label in SEMANTIC_PRESETS.items():
+                matches = [run for run in self._semantic_runs if run.get('preset') == preset]
+                if matches:
+                    latest = max(matches, key=lambda run: (run.get('mtime', 0), run['path']))
+                    runs.append(dict(latest, label=label))
+            # Keep an explicitly loaded selection visible when switching back from history.
+            if selected and all(run['path'] != selected for run in runs):
+                runs.extend(run for run in self._semantic_runs if run['path'] == selected)
+        self._semantic_choices = runs
+        self.semantic_picker.configure(values=[tr('原始数据')] + [run['label'] for run in runs])
+        paths = [run['path'] for run in runs]
+        self.semantic_picker.current(paths.index(selected)+1 if selected in paths else 0)
+        if select:
+            self._select_semantic()
+
     def _load_semantic(self):
         folder = filedialog.askdirectory(parent=self, title=tr('选择包含 run.json 的语义结果文件夹'),
                                          initialdir=os.path.join(HERE, 'results', 'semantic'))
         if not folder:
             return
-        paths = [r['path'] for r in self._semantic_choices]
-        if folder not in paths:
-            self._semantic_choices.append(dict(path=folder, label=os.path.basename(folder)))
-        self.semantic_picker.configure(values=[tr('原始数据')]+[r['label'] for r in self._semantic_choices])
-        self.semantic_picker.current([r['path'] for r in self._semantic_choices].index(folder)+1)
-        self._select_semantic()
+        if all(run['path'] != folder for run in self._semantic_runs):
+            self._semantic_runs.append(dict(path=folder, label=os.path.basename(folder)))
+        self._refresh_semantic_choices(select=folder)
+
+    def _generate_semantic(self, preset):
+        if self._semantic_proc is not None:
+            return
+        title = SEMANTIC_PRESETS[preset]
+        results = os.path.join(HERE, 'results', 'semantic')
+        gallery = os.path.join(HERE, 'results', 'semantic_maps')
+        bag = os.path.join(self.folder, self.bag)
+        try:
+            os.makedirs(results, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=results, prefix=preset+'_', suffix='.log', delete=False) as log:
+                self._semantic_log = log.name
+                self._semantic_output = os.path.splitext(log.name)[0]
+                command = ['bash', os.path.join(HERE, 'semantic', 'run_semantic.sh'), bag,
+                           self._semantic_output, '--preset', preset, '--gallery', gallery]
+                self._semantic_proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
+                                                       stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError as exc:
+            self.var_generation.set(tr('语义地图生成失败：') + str(exc))
+            return
+        self.generate_button.state(['disabled'])
+        self._poll_semantic_generation(title, bag)
+
+    def _poll_semantic_generation(self, title, bag):
+        self._semantic_poll_job = None
+        try:
+            run = read_json(os.path.join(self._semantic_output, 'run.json'))
+        except (OSError, ValueError):
+            run = {}
+        code = self._semantic_proc.poll()
+        if code is None:
+            labels = {'map': tr('正在建立底图'), 'sample': tr('正在配对与抽帧'),
+                      'detect': tr('正在识别'), 'fuse_render': tr('正在融合并保存')}
+            stages = run.get('stages', [])
+            stage = stages[-1]['name'] if stages else None
+            self.var_generation.set('%s · %s' % (title, labels.get(stage, tr('正在准备生成'))))
+            self._semantic_poll_job = self.after(500, self._poll_semantic_generation, title, bag)
+            return
+        self._semantic_proc = None
+        self.generate_button.state(['!disabled'])
+        if code == 0 and run.get('state') == 'complete':
+            discovered = discover_runs(bag, os.path.join(HERE, 'results', 'semantic'))
+            known = {result['path']: result for result in self._semantic_runs}
+            known.update((result['path'], result) for result in discovered)
+            self._semantic_runs = list(known.values())
+            self._refresh_semantic_choices(select=self._semantic_output)
+            if run.get('gallery_error'):
+                text = tr('%s 已生成，图库保存失败。可在更多菜单重试最终地图。') % title
+            else:
+                text = tr('%s 已生成，可在地图图库查看。') % title
+            bounds = (run.get('geometry', {}).get('map') or {}).get('record_bounds') or []
+            if any(value is not None for value in bounds):
+                text += ' ' + tr('结果覆盖底图的有效录制片段。')
+            self.var_generation.set(text)
+            return
+        error = run.get('error')
+        if not error:
+            with open(self._semantic_log, 'rb') as log:
+                log.seek(max(0, os.fstat(log.fileno()).st_size - 2000))
+                lines = log.read().decode('utf-8', 'replace').strip().splitlines()
+                error = lines[-1] if lines else ''
+        self.var_generation.set(tr('语义地图生成失败：') + error + '\n' + self._semantic_log)
 
     def _redraw_semantic(self):
         if self._last.get('semantic') and not self._last.get('err'):
@@ -1231,8 +1333,8 @@ class BagViewer(tk.Toplevel):
             return
         if 'init' in d:
             info = d['init']
-            self._semantic_choices = info.get('semantic_runs', [])
-            self.semantic_picker.configure(values=[tr('原始数据')]+[r['label'] for r in self._semantic_choices])
+            self._semantic_runs = info.get('semantic_runs', [])
+            self._refresh_semantic_choices()
             self._update_context(info)
             self._load_phase=tr('正在准备第一帧')
             self._set_controls(True)
@@ -1551,7 +1653,7 @@ class BagViewer(tk.Toplevel):
         self.spinner.stop()
         self._close_map_window()
         if self._export_pool:self._export_pool.shutdown(wait=False)
-        for job in (self._load_job,self._drain_job,self._play_job,self._resize_job,self._export_poll_job,self._layout_job):
+        for job in (self._load_job,self._drain_job,self._play_job,self._resize_job,self._export_poll_job,self._layout_job,self._semantic_poll_job):
             if job:
                 try:self.after_cancel(job)
                 except tk.TclError:pass

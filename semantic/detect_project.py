@@ -14,14 +14,16 @@
 权重路径可用 SEMANTIC_WEIGHTS 覆盖；cv2 后端的模型在 SEMANTIC_MODELS 下。
 """
 import argparse
-import glob
 import json
 import os
+import sys
 
 import numpy as np
 from PIL import Image
 from depth_projection import project_depth
 import hashlib
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from viewer_core import frame_metadata
 
 MODELS = os.environ.get('SEMANTIC_MODELS',
                         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'))
@@ -134,7 +136,7 @@ def main():
     predictions=dict(schema_version=1,confidence_floor=args.conf,frames={})
     obs = []
     detections=[]
-    frames = sorted(glob.glob(os.path.join(args.frames_dir, '[0-9][0-9][0-9][0-9]')))
+    frames = [os.path.dirname(path) for path in frame_metadata(args.frames_dir)]
     if not frames:
         raise ValueError('No frames to detect')
     world, geometry = None, None

@@ -400,5 +400,22 @@
   "最终地图已保存：": "Final map saved: ",
   "最终地图导出失败：": "Could not export final map: ",
   "范围 %.1f m": "Width %.1f m",
-  "地图图库": "Map gallery"
+  "地图图库": "Map gallery",
+  "生成语义地图": "Generate semantic map",
+  "YOLO26s · 检测框": "YOLO26s · Detection boxes",
+  "B1 · 分割深度": "B1 · Mask depth",
+  "视图": "View",
+  "更多": "More",
+  "缩小地图": "Zoom out",
+  "放大比例": "Zoom in",
+  "显示全部历史结果": "Show all previous runs",
+  "语义地图生成失败：": "Semantic map generation failed: ",
+  "正在建立底图": "Building base map",
+  "正在配对与抽帧": "Pairing and sampling frames",
+  "正在识别": "Detecting objects",
+  "正在融合并保存": "Fusing and saving",
+  "正在准备生成": "Preparing generation",
+  "%s 已生成，可在地图图库查看。": "%s complete. Open Map gallery to view it.",
+  "结果覆盖底图的有效录制片段。": "Results cover the valid mapped interval.",
+  "%s 已生成，图库保存失败。可在更多菜单重试最终地图。": "%s complete. Gallery export failed. Retry Final map in More."
 }

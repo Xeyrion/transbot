@@ -78,7 +78,7 @@ while True:
         server.write_text('''import json,sys
 context=dict(dur=5,t0=100,world='map',has_map=True)
 print(json.dumps(dict(dur=5,t0=100,world='base',has_map=False,
-    semantic_runs=[dict(path='/semantic/test',label='yolo26s')])));sys.stdout.flush()
+    semantic_runs=[dict(path='/semantic/test',label='yolo26s',preset='yolo26s'),dict(path='/semantic/old',label='C1')])));sys.stdout.flush()
 previous=None
 while True:
  line=sys.stdin.readline()
@@ -100,7 +100,10 @@ while True:
         self.gui.SERVER = str(server)
         v = self.gui.BagViewer(self.root, str(self.folder), 'unused.bag')
         self.pump(lambda:not v._loading)
-        self.assertEqual(len(v.semantic_picker['values']), 2)
+        self.assertEqual(tuple(v.semantic_picker['values'])[1:], ('YOLO26s',))
+        v.var_all_runs.set(True);v._refresh_semantic_choices()
+        self.assertIn('C1', v.semantic_picker['values'])
+        v.var_all_runs.set(False);v._refresh_semantic_choices()
         v.semantic_picker.current(1);v._select_semantic()
         self.pump(lambda:bool(v._last.get('semantic')))
         self.assertEqual(v.world, 'map')
@@ -151,6 +154,24 @@ while True:
         self.pump(lambda:not v._last.get('semantic'))
         self.assertEqual(v.world, 'base')
         self.assertEqual(v._export_rgb.getpixel((5, 20)), (0, 0, 0))
+        def start_generation(command, **kwargs):
+            self.assertEqual(command[4:6], ['--preset', 'b1'])
+            self.assertEqual(command[-1], str(self.folder/'results'/'semantic_maps'))
+            output = Path(command[3]);output.mkdir()
+            (output/'run.json').write_text('{"state":"complete"}')
+            scan.return_value = [dict(path=str(output), label='B1 result', preset='b1')]
+            process = Mock()
+            process.poll.side_effect = [None, 0]
+            return process
+        with patch.object(self.gui,'HERE',str(self.folder)), \
+                patch.object(self.gui,'discover_runs') as scan, \
+                patch.object(self.gui.subprocess,'Popen',side_effect=start_generation):
+            menu = v.nametowidget(str(v.generate_button['menu']))
+            menu.invoke(1)
+            self.assertTrue(v.generate_button.instate(['disabled']))
+            self.pump(lambda:v._semantic_proc is None)
+            self.assertEqual(v.semantic_picker.get(), 'B1')
+            self.pump(lambda:v._last.get('semantic_run') == v._semantic_output)
         v.close()
 
     def test_session_selection_and_nonblocking_preview(self):

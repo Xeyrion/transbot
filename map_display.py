@@ -1,5 +1,4 @@
 """Shared world-to-pixel geometry and standalone full-session semantic maps."""
-import glob
 import hashlib
 import json
 import math
@@ -8,6 +7,7 @@ import re
 import shutil
 from PIL import Image, ImageDraw, ImageFont
 from session_catalog import STAMP_PREFIX, session_label
+from viewer_core import frame_metadata
 
 
 class Viewport:
@@ -125,7 +125,7 @@ def export_final_map(folder,destination=None,size=(2400,1600),gallery=None):
     world=run['world_frame']
     if data['world_frame']!=world:raise ValueError('Object and map coordinate frames differ')
     objects=data['objects'];path=[]
-    for meta_path in sorted(glob.glob(os.path.join(folder,'[0-9][0-9][0-9][0-9]','meta.json'))):
+    for meta_path in frame_metadata(folder):
         with open(meta_path) as f:meta=json.load(f)
         if meta.get('world_frame')!=world:raise ValueError('Mixed trajectory coordinate frames')
         m=meta.get('t_world_optical',meta.get('t_map_cam'))

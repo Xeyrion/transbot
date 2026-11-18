@@ -8,13 +8,15 @@
 位置会稳得多 —— 这也是"多帧融合"的全部意义。
 """
 import argparse
-import glob
 import json
 import math
 import os
+import sys
 
 import numpy as np
 from PIL import Image, ImageDraw
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from viewer_core import frame_metadata
 
 COLORS = [(239, 68, 68), (56, 189, 248), (74, 222, 128), (245, 158, 11),
           (168, 85, 247), (236, 72, 153), (20, 184, 166), (250, 204, 21)]
@@ -221,7 +223,7 @@ def draw_map(canvas, map_yaml, to_px, ppm):
 def render(objects, frames_dir, path, map_yaml=None):
     """俯视图：地图 + 轨迹 + 物体。范围按轨迹自动扩。"""
     poses = []
-    for meta_path in sorted(glob.glob(os.path.join(frames_dir, '[0-9][0-9][0-9][0-9]/meta.json'))):
+    for meta_path in frame_metadata(frames_dir):
         m = json.load(open(meta_path))['t_map_cam']
         poses.append((m[0][3], m[1][3]))
     if not poses and not objects:
@@ -240,7 +242,7 @@ def render(objects, frames_dir, path, map_yaml=None):
 
     if map_yaml:
         worlds = set()
-        for p in glob.glob(os.path.join(frames_dir, '[0-9][0-9][0-9][0-9]/meta.json')):
+        for p in frame_metadata(frames_dir):
             with open(p) as f:
                 meta = json.load(f)
             worlds.add(meta.get('world_frame', meta.get('root')))

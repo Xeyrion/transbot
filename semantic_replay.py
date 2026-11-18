@@ -10,7 +10,7 @@ import glob
 import hashlib
 import json
 import os
-from viewer_core import session_files
+from viewer_core import session_files, frame_metadata
 
 
 COLORS = {'fused': (74, 222, 128), 'depth': (56, 189, 248),
@@ -45,7 +45,14 @@ def discover_runs(bag_path, root):
             validate_sources(run, bag_path)
             model = os.path.splitext(os.path.basename(run.get('model', {}).get('path') or 'model'))[0]
             title = run.get('display_label_en') if os.environ.get('BAGTOOLS_LANG','').startswith('en') else run.get('display_label')
-            found.append(dict(path=os.path.dirname(path), label=title or model+' | '+os.path.basename(os.path.dirname(path))))
+            run_id = run.get('run_id', '')
+            preset = run.get('preset')
+            if not preset and model == 'yolo26s' and run_id.endswith('_coco_yolo26s'):
+                preset = 'yolo26s'
+            if not preset and model == 'yolo26s-seg' and run_id.endswith('_B1'):
+                preset = 'b1'
+            found.append(dict(path=os.path.dirname(path), label=title or model+' | '+os.path.basename(os.path.dirname(path)),
+                              preset=preset, mtime=os.path.getmtime(path)))
         except (IOError, OSError, ValueError, KeyError, TypeError):
             continue
     return found
@@ -105,7 +112,7 @@ class SemanticReplay(object):
             self.detections.setdefault(det['source_frame'], []).append(det)
         self.samples = []
         trajectory=[]
-        for path in sorted(glob.glob(os.path.join(self.folder, '[0-9]*', 'meta.json'))):
+        for path in frame_metadata(self.folder):
             meta = read_json(path)
             matrix=meta.get('t_world_optical',meta.get('t_map_cam'))
             if matrix and meta.get('world_frame')==self.world:

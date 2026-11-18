@@ -15,6 +15,13 @@ def filesystem_text(path):
     return path
 
 
+def frame_metadata(folder):
+    """List numeric sample folders in frame order, including IDs above 9999."""
+    paths = glob.glob(os.path.join(folder, '[0-9]*', 'meta.json'))
+    frames = [(os.path.basename(os.path.dirname(path)), path) for path in paths]
+    return [path for name, path in sorted((f for f in frames if f[0].isdigit()), key=lambda f: int(f[0]))]
+
+
 def compose(a, b):
     x, y, angle = a
     c, s = math.cos(angle), math.sin(angle)

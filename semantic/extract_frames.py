@@ -153,6 +153,7 @@ def main():
     ap.add_argument('bag'); ap.add_argument('outdir')
     ap.add_argument('--step', type=float, default=1.)
     ap.add_argument('--max', type=int, default=120)
+    ap.add_argument('--all', action='store_true', help='Sample the entire mapped interval')
     ap.add_argument('--max-pair-ms', type=float, default=33.)
     ap.add_argument('--root', choices=['map', 'odom'], default=None)
     ap.add_argument('--record-start', type=float)
@@ -167,7 +168,7 @@ def main():
     if args.record_start is not None and args.record_end is not None and args.record_start >= args.record_end:
         ap.error('record-start must be before record-end')
     if os.path.isdir(args.outdir) and any(glob.glob(os.path.join(args.outdir, pattern))
-            for pattern in ['[0-9][0-9][0-9][0-9]', 'sampling.json', 'observations.json', 'objects.json']):
+            for pattern in ['[0-9]*/meta.json', 'sampling.json', 'observations.json', 'objects.json']):
         ap.error('Output contains previous results; use a new run directory')
     if not os.path.isdir(args.outdir): os.makedirs(args.outdir)
     files = session_files(args.bag)
@@ -203,7 +204,7 @@ def main():
         report.update(world_frame=world, geometry=tf.geometry, indexed_rgb=len(rgb_index.entries),
                       indexed_depth=len(depth_index.entries))
         for entry in rgb_index.sampled(args.step):
-            if report['frames'] >= args.max: break
+            if not args.all and report['frames'] >= args.max: break
             pair = depth_index.nearest(entry['header'], args.max_pair_ms/1000.)
             if pair is None:
                 rejected['pair_outside_limit'] += 1; continue

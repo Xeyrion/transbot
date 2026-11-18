@@ -14,7 +14,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-from viewer_core import session_files
+from viewer_core import association, session_files
+
+
+PRESETS = {
+    'yolo26s': ('YOLO26s', 'yolo26s.pt', 'center'),
+    'b1': ('B1', 'yolo26s-seg.pt', 'mask-surface'),
+}
 
 
 def digest(path):
@@ -27,9 +33,13 @@ def digest(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('bag'); ap.add_argument('out', nargs='?')
+    ap.add_argument('--preset', choices=sorted(PRESETS))
+    ap.add_argument('--gallery', help='Export the finished PNG into this map gallery')
     args = ap.parse_args()
     sources = session_files(os.path.abspath(args.bag))
     if not sources: ap.error('No bag sources found')
+    if args.preset and any(glob_name.endswith('.bag.active') for glob_name in os.listdir(os.path.dirname(sources[0]))):
+        ap.error('Recording is still active. Wait for the bag to close.')
     for path in sources:
         if not os.path.isfile(path): ap.error('Missing bag: ' + path)
     if args.out:
@@ -59,7 +69,22 @@ def main():
         finally:
             stage['elapsed_s'] = time.monotonic()-started; save()
     try:
-        backend = os.environ.get('BACKEND', 'yolo26')
+        settings = dict(os.environ)
+        if args.preset:
+            title, weights_name, projection = PRESETS[args.preset]
+            manifest.update(preset=args.preset, display_label=title, display_label_en=title)
+            settings.update(BACKEND='yolo26', SEMANTIC_WEIGHTS=os.path.join(ROOT, 'models', weights_name),
+                            PROJECTION=projection, CONF='0.35', STEP='1', MAX_PAIR_MS='33', WORLD_FRAME='map',
+                            RADIUS='0.6', MIN_HITS='3', ASSOCIATION='point', MIN_DURATION='0',
+                            MIN_VIEW_BASELINE='0', MIN_VIEW_ANGLE='0',
+                            CLASSES='chair,dining table,laptop,tv,keyboard,mouse,bench')
+            for key in ('MAP_ASSOCIATION', 'RECORD_START', 'RECORD_END', 'ALLOW_ESTIMATED_EXTRINSICS',
+                        'OVERRIDE_RECORDED_EXTRINSICS'):
+                settings.pop(key, None)
+            calibration = os.path.join(os.path.dirname(sources[0]), 'calibration.json')
+            if os.path.isfile(calibration):
+                settings['BAGTOOLS_CALIBRATION'] = calibration
+        backend = settings.get('BACKEND', 'yolo26')
         clean_env = dict(os.environ)
         clean_env.pop('PYTHONPATH', None); clean_env.pop('PYTHONHOME', None)
         if backend == 'yolo26':
@@ -67,7 +92,7 @@ def main():
                 ['~/miniconda3/envs/yolo/bin/python', '~/miniconda3/bin/python']]
             python = next((p for p in candidates if os.path.isfile(p)), None)
             if not python: raise ValueError('YOLO environment missing; explicitly select BACKEND=cv2 to use Darknet')
-            weights = os.path.abspath(os.path.expanduser(os.environ.get('SEMANTIC_WEIGHTS', os.path.join(ROOT,'yolo26n.pt'))))
+            weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(ROOT,'yolo26n.pt'))))
             if not os.path.isfile(weights): raise ValueError('Local weights missing: '+weights)
             clean_env['SEMANTIC_WEIGHTS'] = weights
             manifest['model'] = dict(backend=backend, path=weights, sha256=digest(weights), python=python)
@@ -79,20 +104,27 @@ def main():
                 files={n:digest(os.path.join(models,n)) for n in ['yolov3-tiny.cfg','yolov3-tiny.weights','coco.names']})
         else:
             raise ValueError('Unsupported backend: '+backend)
+        if args.preset and not association(sources[0]):
+            from mapping_job import new_job, read_status
+            job = new_job(sources[0])
+            try:
+                run('map', [sys.executable, os.path.join(ROOT, 'mapping_job.py'), sources[0], '--job', str(job)])
+            except subprocess.CalledProcessError:
+                raise RuntimeError(read_status(job).get('error', 'Base map failed. See '+str(job)))
         extract = ['python2', os.path.join(HERE,'extract_frames.py'), sources[0], out,
-            '--step', os.environ.get('STEP','1'), '--max', os.environ.get('MAX_FRAMES','120'),
-            '--max-pair-ms', os.environ.get('MAX_PAIR_MS','33')]
+            '--step', settings.get('STEP','1'), '--max-pair-ms', settings.get('MAX_PAIR_MS','33')]
+        extract += ['--all'] if args.preset else ['--max', settings.get('MAX_FRAMES', '120')]
         for envkey, flag in [('WORLD_FRAME','--root'),('RECORD_START','--record-start'),
                              ('RECORD_END','--record-end'),('MAP_ASSOCIATION','--map-association')]:
-            if os.environ.get(envkey): extract += [flag, os.environ[envkey]]
-        if os.environ.get('BAGTOOLS_CALIBRATION'):
-            config = os.path.abspath(os.path.expanduser(os.environ['BAGTOOLS_CALIBRATION']))
+            if settings.get(envkey): extract += [flag, settings[envkey]]
+        if settings.get('BAGTOOLS_CALIBRATION'):
+            config = os.path.abspath(os.path.expanduser(settings['BAGTOOLS_CALIBRATION']))
             snapshot = os.path.join(out,'calibration.json')
             shutil.copy2(config,snapshot)
             manifest['calibration_sha256'] = digest(snapshot)
             extract += ['--calibration',snapshot]
-        if os.environ.get('ALLOW_ESTIMATED_EXTRINSICS') == '1': extract += ['--allow-estimated-extrinsics']
-        if os.environ.get('OVERRIDE_RECORDED_EXTRINSICS') == '1': extract += ['--override-recorded-extrinsics']
+        if settings.get('ALLOW_ESTIMATED_EXTRINSICS') == '1': extract += ['--allow-estimated-extrinsics']
+        if settings.get('OVERRIDE_RECORDED_EXTRINSICS') == '1': extract += ['--override-recorded-extrinsics']
         run('sample', extract)
         with open(os.path.join(out,'sampling.json')) as f: sampling = json.load(f)
         manifest.update(world_frame=sampling['world_frame'], geometry=sampling['geometry'])
@@ -107,20 +139,29 @@ def main():
             paths.append(candidate)
             manifest['geometry_sha256'] = {p:digest(p) for p in paths}
         run('detect', [python, os.path.join(HERE,'detect_project.py'), out, '--backend', backend,
-                      '--projection',os.environ.get('PROJECTION','center'),
-                      '--conf', os.environ.get('CONF','0.25')], env=clean_env)
+                      '--projection',settings.get('PROJECTION','center'),
+                      '--conf', settings.get('CONF','0.25')], env=clean_env)
         cluster = [sys.executable, os.path.join(HERE,'cluster_objects.py'), out,
-            '--radius', os.environ.get('RADIUS','0.6'), '--min-hits', os.environ.get('MIN_HITS','3')]
+            '--radius', settings.get('RADIUS','0.6'), '--min-hits', settings.get('MIN_HITS','3')]
         manifest['background'] = 'absent'
         if linked and sampling['world_frame'] == 'map':
             cluster += ['--map', linked['yaml']]; manifest['background'] = linked['yaml']
-        if os.environ.get('CLASSES'): cluster += ['--classes', os.environ['CLASSES']]
+        if settings.get('CLASSES'): cluster += ['--classes', settings['CLASSES']]
         for envkey, flag in [('MIN_DURATION','--min-duration'),('MIN_VIEW_BASELINE','--min-view-baseline'),('MIN_VIEW_ANGLE','--min-view-angle'),('ASSOCIATION','--association')]:
-            if os.environ.get(envkey):cluster += [flag,os.environ[envkey]]
+            if settings.get(envkey):cluster += [flag,settings[envkey]]
         run('fuse_render', cluster)
         if any(os.path.getsize(s['path'])!=s['size'] or os.path.getmtime(s['path'])!=s['mtime'] for s in manifest['sources']):
             raise ValueError('Source bags changed during analysis')
         manifest['state'] = 'complete'; save()
+        if args.gallery:
+            from map_display import export_final_map, gallery_image_path
+            try:
+                export_final_map(out, gallery=args.gallery)
+                manifest['gallery_image'] = os.path.join(os.path.abspath(args.gallery), gallery_image_path(manifest, out))
+            except (OSError, ValueError) as exc:
+                manifest['gallery_error'] = str(exc)
+                print('Gallery export failed: ' + str(exc), file=sys.stderr)
+            save()
         print('Completed: '+out)
         print('World frame: %s; background: %s' % (sampling['world_frame'],manifest['background']))
         return 0
