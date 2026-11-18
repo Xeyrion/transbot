@@ -16,6 +16,10 @@ __pycache__/
 /bagtools/
 /bagfiles/
 /archive/
+/wallmark/
+/vendor/
+/docs/manuals/
+/docs/reference/
 /tmp/
 
 # RViz / rqt local state
