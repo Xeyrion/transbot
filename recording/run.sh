@@ -15,7 +15,7 @@
 cd "$(dirname "$0")" || exit 1
 
 if [ ! -f record_gui.py ]; then
-  echo "缺少 record_gui.py，这个脚本要在 bagtools/recording/ 里跑" >&2
+  echo "缺少 record_gui.py，请检查项目的 recording 目录" >&2
   exit 1
 fi
 

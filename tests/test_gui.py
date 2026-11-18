@@ -337,7 +337,7 @@ while True:
             self.root.update()
             self.assertEqual(home.buttons['record'].cget('text'),'Recording Console')
             self.assertEqual(home.buttons['review'].cget('text'),'Session Browser')
-            self.assertEqual(self.root.title(),'Transbot Data Workbench')
+            self.assertEqual(self.root.title(),'Transbot Semantic Mapping Studio')
             home.close()
 
 

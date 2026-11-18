@@ -8,15 +8,11 @@ import subprocess
 import sys
 import tkinter as tk
 from i18n import tr
+from project_paths import default_data_dir
 from tkinter import messagebox
 
 HERE = Path(__file__).resolve().parent
 BG = '#eef1f4'
-
-
-def default_data_dir():
-    return os.path.abspath(os.path.expanduser(os.environ.get('BAGTOOLS_DATA_DIR',
-        os.environ.get('LOCAL_DIR', '~/robot_research/bagtools/bags'))))
 
 
 def launch_spec(kind, data_dir):
@@ -35,19 +31,19 @@ class Workbench:
         self.children = {}
         self.buttons = {}
         self.closed = False
-        root.title(tr('Transbot 数据工作台'))
+        root.title(tr('Transbot 语义建图工作台'))
         root.configure(bg=BG)
         root.geometry('%dx%d' % (min(760, root.winfo_screenwidth()-60),
                                 min(420, root.winfo_screenheight()-100)))
-        tk.Label(root,text=tr('Transbot 数据工作台'),bg=BG,fg='#203039',
+        tk.Label(root,text=tr('Transbot 语义建图工作台'),bg=BG,fg='#203039',
                  font=('',20,'bold')).pack(anchor='w',padx=24,pady=(24,4))
-        tk.Label(root,text=tr('从这里开始录制，或查看已回传的会话。'),bg=BG,fg='#6b7b86',
+        tk.Label(root,text=tr('多模态采集 · 数据回放 · 语义建图'),bg=BG,fg='#6b7b86',
                  font=('',11)).pack(anchor='w',padx=24)
         cards=tk.Frame(root,bg=BG);cards.pack(fill='both',expand=True,padx=20,pady=20)
         cards.rowconfigure(0,weight=1)
         for i,(kind,title,detail,color) in enumerate([
             ('record',tr('录制控制'),tr('采集 · 停止 · 回传'),'#2e7d32'),
-            ('review',tr('数据阅读'),tr('选择会话 · 分析 · 回放'),'#1565a3')]):
+            ('review',tr('数据阅读'),tr('分析 · 回放 · 建图 · 语义'),'#1565a3')]):
             cards.columnconfigure(i,weight=1,uniform='tools')
             card=tk.Frame(cards,bg='white',padx=16,pady=16)
             card.grid(row=0,column=i,sticky='nsew',padx=4)

@@ -46,6 +46,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
 from i18n import tr, translate_log
 from session_catalog import session_label
+from project_paths import default_data_dir
 ROS_SETUP = '/opt/ros/melodic/setup.bash'
 
 
@@ -620,8 +621,7 @@ class App:
         row = tk.Frame(box, bg=CARD)
         row.pack(fill=tk.X, pady=(6, 0))
         tk.Label(row, text=tr('回传根目录'), bg=CARD, fg=DIM).pack(side=tk.LEFT)
-        self.var_local = tk.StringVar(value=os.environ.get(
-            'LOCAL_DIR', os.path.expanduser('~/robot_research/bagtools/bags')))
+        self.var_local = tk.StringVar(value=default_data_dir())
         tk.Entry(row, textvariable=self.var_local, width=34).pack(side=tk.LEFT, padx=6)
 
         # 会话名：只影响会话目录名，包名（cam_<时间戳>.bag）保持不变。

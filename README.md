@@ -1,55 +1,64 @@
-# Transbot Bagtools
+# Transbot 语义建图工作台
 
-控制机上的录制、回传、数据阅读、二维建图和离线语义地图工具。日常从一个工作台进入，运行时只使用当前地图。
+**Transbot Semantic Mapping Studio · 第一阶段：离线语义建图演示**
+
+从 RGB-D 与二维雷达录制，到数据检查、二维地图重建、物品识别、三维定位及语义回放的控制机工具。当前阶段已完成可演示的离线流程，范围见[阶段总结](docs/stage_01.md)。
 
 ```bash
-cd ~/robot_research/bagtools
-./run.sh           # 中文工作台
-./run_en.sh        # English workbench
+cd ~/transbot/semantic_mapping
+bash run.sh               # 中文工作台
+bash run_en.sh            # English workbench
+bash install_workbench.sh # 安装或更新桌面入口
 ```
 
-在“数据阅读”中选择会话文件夹，点击“建图 / 重新建图”。同次录制的分卷自动合并；已有当前地图时确认替换。成功后直接使用新图，旧图归档，失败或取消不替换当前结果。
+## 日常流程
 
-打开某个包后，可在“语义回放”中选择该会话已完成的模型结果，同时查看 RGB 推理框、对齐深度和地图物品候选点；框与地图编号相互对应。当前示例选择 `yolo26s`。详见[回放说明](docs/workbench.md#语义结果回放)。
+1. **录制控制**：录前准备、填写名称、开始与停止录制，按文件校验后回传。
+2. **数据阅读**：选择会话，分析或逐帧查看 RGB、深度、雷达与位姿。
+3. **建图 / 重新建图**：从包内数据生成二维地图和关联轨迹；替换前确认，旧图集中归档。
+4. **生成语义地图**：选择 YOLO26s 或 YOLO26s 分割，后台抽帧、识别、投影与融合。动态进度条显示阶段和已用时间。
+5. **语义回放 / 地图图库**：查看推理框、掩膜、深度拒绝原因、物品候选点，导出最终地图或三合一图片。
 
-## 目录
+栅格底图可选，三维定位需要有效深度、相机内外参和机器人位姿。没有底图时使用 odom 坐标。候选点代表物品可见表面的估计位置；精度验证和裂缝分割属于下一阶段。
+
+## 源码与数据分开
 
 ```text
-bagtools/
-  *.py, *.sh           工作台、阅读器、建图入口
-  recording/           录制与回传
-  semantic/            RGB-D、检测、投影、融合、标定
-  tests/               自动测试
-  locale/              界面翻译
-  docs/                当前文档
-  bags/<会话>/         原始 bag 与会话信息
-    maps/<录制名>/     当前地图、轨迹、association.json
-  results/             当前研究输出（例如语义运行）
-  datasets/            抽取原图、人工标注与数据集说明（不提交 Git）
-  archive/             旧地图、构建日志、实验、历史报告与备份
+transbot/semantic_mapping/     GitHub 项目源码
+  workbench.py, run*.sh        中英文启动入口
+  bag_quality_gui.py          会话管理、阅读器、建图与语义任务
+  recording/                  采集、状态、回传及统一外参配置
+  semantic/                   抽帧、投影、检测、融合与标注导出
+  paths.example.json          数据与模型路径配置示例
+  paths.local.json            本机配置，不提交 Git
+  docs/, tests/, locale/      当前文档、验证与翻译
+
+<本机数据根目录>/<会话>/      保持原位置，不随源码移动或上传
+  *.bag                       原始分卷、回传记录和标定副本
+  maps/<录制名>/              当前地图、轨迹和关联信息
+  semantic/<录制名>/          各次语义运行、gallery/、comparisons/
 ```
 
-源码和当前文档由 Git 管理；bag、模型权重、输出和归档不提交。项目是独立本地仓库，尚未发布远程。使用 `git status`、`git diff` 查看改动，确认后提交；不再为每次代码修改复制一份源码备份。
+复制 `paths.example.json` 为 `paths.local.json`，设置 `data_dir` 与 `models_dir`。现有控制机配置继续引用 `~/robot_research/bagtools/bags` 和 `~/robot_research/bagtools/models`，数据、标注图片、模型及生成结果均保持原位置。没有本机配置时默认使用项目旁的 `bags/` 和 `models/`。相对路径按项目目录解析，与启动时所在目录无关。
 
-## 文档
+环境变量 `BAGTOOLS_DATA_DIR`、`LOCAL_DIR` 以及 `BAGTOOLS_MODELS_DIR` 可覆盖本机配置；`SEMANTIC_WEIGHTS` 用于自定义模型命令行。机器人本地录制根目录仍为 `/home/jetson/bags`。移动源码后重新运行桌面入口安装器。
 
-- [工作流](docs/workflow.md)
-- [建图按钮](docs/mapping_button.md)
-- [架构与目录](docs/architecture.md)
-- [相机外参](docs/calibration.md)
-- [语义算法](docs/semantic_algorithm.md)
+源码纳入 Transbot 主仓库，原 Bagtools Git 历史保留。大数据、权重、运行输出、归档和本机配置全部排除在提交之外。
+
+## 文档与验证
+
+- [阶段总结](docs/stage_01.md) · [当前状态](docs/project_status.md)
+- [使用与回放](docs/workbench.md) · [工作流](docs/workflow.md)
+- [架构](docs/architecture.md) · [建图](docs/mapping_button.md)
+- [语义算法](docs/semantic_algorithm.md) · [相机外参](docs/calibration.md)
 - [裂缝图片与分割标注](semantic/LABELING.md)
-- [项目状态](docs/project_status.md)
 
-## 命令行
+控制机：Ubuntu 18.04 / ROS Melodic；GUI 使用 Python 3，bag 读取使用 ROS Python 2，YOLO 使用独立 Conda 环境。
 
 ```bash
-./rebuild_map.sh bags/<会话>/<首卷>.bag            # 首次建图
-./rebuild_map.sh bags/<会话>/<首卷>.bag --replace  # 更新当前地图，旧图归档
-./build_maps.sh --dry-run                        # 查看批量任务
-./build_maps.sh                                 # 给尚无当前地图的会话建图
+source /opt/ros/melodic/setup.bash
+python3 -m unittest discover -s tests
+BAGTOOLS_GUI_TEST=1 xvfb-run -a python3 -m unittest discover -s tests -p test_gui.py
+bash rebuild_map.sh /path/to/recording/first.bag           # 首次建图
+bash rebuild_map.sh /path/to/recording/first.bag --replace # 更新，旧图归档
 ```
-
-命令行与界面使用同一套 MappingJob；`rebuild_map.py` 是内部 ROS 解算器。二维建图使用雷达、里程计和底盘 TF，相机标定用于后续物品投影。地图完整性取决于实际采集覆盖，不因成功出图就自动获得精度保证。
-
-验证：在控制机 source ROS 后运行 `BAGTOOLS_GUI_TEST=1 xvfb-run -a python3 -m unittest discover -s tests -v`。ROS 端到端检查为 `python3 tests/mapping_integration_checks.py "$PWD"`。

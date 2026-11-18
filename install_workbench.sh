@@ -10,8 +10,8 @@ root,desktop=map(Path,sys.argv[1:])
 def quote(s):
     return '"'+s.replace('\\','\\\\').replace('"','\\"').replace('`','\\`').replace('$','\\$').replace('%','%%')+'"'
 for suffix,title,comment,entry in [
-        ('', 'Transbot 数据工作台', '机器人录制与数据阅读统一入口', 'run.sh'),
-        ('-en', 'Transbot Data Workbench (EN)', 'Robot recording and session review', 'run_en.sh')]:
+        ('', 'Transbot 语义建图工作台', '多模态采集、数据回放与离线语义建图', 'run.sh'),
+        ('-en', 'Transbot Semantic Mapping Studio (EN)', 'Multimodal recording, replay and semantic mapping', 'run_en.sh')]:
     script=root/entry
     if not script.exists():
         sys.exit('missing launcher: %s' % script)
@@ -38,4 +38,4 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
   desktop-file-validate "$entry"
 fi
 done
-echo '日常入口：控制机桌面的“Transbot 数据工作台”。'
+echo '日常入口：控制机桌面的“Transbot 语义建图工作台”。'

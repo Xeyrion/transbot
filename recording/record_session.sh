@@ -18,7 +18,8 @@ set -euo pipefail
 
 TAG="${1:-session}"
 DURATION="${2:-300}"
-OUT_DIR="${BAG_DIR:-$HOME/robot_research/bagtools/bags}"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+OUT_DIR="${BAG_DIR:-$(python3 "$PROJECT_DIR/project_paths.py")}"
 
 if ! command -v rosbag >/dev/null 2>&1; then
     echo "ERROR: rosbag not found. Source ROS first:" >&2

@@ -16,6 +16,7 @@ sys.path.insert(0, ROOT)
 from viewer_core import association, session_files, semantic_directory
 from semantic_presets import PRESETS, PRESET_ALIASES
 from semantic_storage import digest, snapshot_map
+from project_paths import models_dir
 
 
 PROFILES = {key: (title, english, weights, projection) for key, title, english, weights, projection in PRESETS}
@@ -66,7 +67,7 @@ def main():
         if args.preset:
             title, english, weights_name, projection = PROFILES[args.preset]
             manifest.update(preset=args.preset, display_label=title, display_label_en=english)
-            settings.update(BACKEND='yolo26', SEMANTIC_WEIGHTS=os.path.join(ROOT, 'models', weights_name),
+            settings.update(BACKEND='yolo26', SEMANTIC_WEIGHTS=os.path.join(models_dir(), weights_name),
                             PROJECTION=projection, CONF='0.35', STEP='1', MAX_PAIR_MS='33',
                             RADIUS='0.6', MIN_HITS='3', ASSOCIATION='point', MIN_DURATION='0',
                             MIN_VIEW_BASELINE='0', MIN_VIEW_ANGLE='0',
@@ -85,13 +86,13 @@ def main():
                 ['~/miniconda3/envs/yolo/bin/python', '~/miniconda3/bin/python']]
             python = next((p for p in candidates if os.path.isfile(p)), None)
             if not python: raise ValueError('YOLO environment missing; explicitly select BACKEND=cv2 to use Darknet')
-            weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(ROOT,'models','yolo26s.pt'))))
+            weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(models_dir(),'yolo26s.pt'))))
             if not os.path.isfile(weights): raise ValueError('Local weights missing: '+weights)
             clean_env['SEMANTIC_WEIGHTS'] = weights
             manifest['model'] = dict(backend=backend, path=weights, sha256=digest(weights), python=python)
         elif backend == 'cv2':
             python = sys.executable
-            models = os.path.abspath(os.environ.get('SEMANTIC_MODELS', os.path.join(ROOT,'models')))
+            models = os.path.abspath(os.environ.get('SEMANTIC_MODELS', models_dir()))
             clean_env['SEMANTIC_MODELS'] = models
             manifest['model'] = dict(backend=backend, directory=models,
                 files={n:digest(os.path.join(models,n)) for n in ['yolov3-tiny.cfg','yolov3-tiny.weights','coco.names']})

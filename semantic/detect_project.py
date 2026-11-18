@@ -24,9 +24,9 @@ from depth_projection import project_depth
 import hashlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from viewer_core import frame_metadata
+from project_paths import models_dir
 
-MODELS = os.environ.get('SEMANTIC_MODELS',
-                        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'))
+MODELS = os.environ.get('SEMANTIC_MODELS', models_dir())
 NMS = 0.4
 
 

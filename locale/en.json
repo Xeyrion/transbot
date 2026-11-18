@@ -1,5 +1,7 @@
 {
-  "Transbot 数据工作台": "Transbot Data Workbench",
+  "Transbot 语义建图工作台": "Transbot Semantic Mapping Studio",
+  "多模态采集 · 数据回放 · 语义建图": "Multimodal recording · Replay · Semantic mapping",
+  "分析 · 回放 · 建图 · 语义": "Analyze · Replay · Map · Semantics",
   "从这里开始录制，或查看已回传的会话。": "Record a session or explore downloaded data.",
   "就绪": "Ready",
   "录制控制": "Recording Console",
@@ -279,7 +281,7 @@
   "状态：正在准备数据源（可取消）": "State: starting data source (cancellable)",
   "状态：未在录制": "State: idle",
   "日志尾部：": "Log tail:",
-  "缺少 record_gui.py，这个脚本要在 bagtools/recording/ 里跑": "record_gui.py is missing; run this script from bagtools/recording/",
+  "缺少 record_gui.py，请检查项目的 recording 目录": "record_gui.py is missing; check the project's recording directory",
   "缺少 python3": "python3 is missing",
   "缺少 python3-tk：sudo apt install python3-tk": "python3-tk is missing: sudo apt install python3-tk",
   "缺少 ssh 客户端：sudo apt install openssh-client": "ssh client is missing: sudo apt install openssh-client",

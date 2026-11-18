@@ -15,10 +15,14 @@
 ## 其他目录
 
 - `bags/`：原始采集与回传信息，不在整理中改写原始包。
-- `results/`：当前研究运行结果。
+- 数据根目录中 `<会话>/semantic/<录制名>/`：各次语义运行、地图快照、图库和比较。
+- 共享模型目录：由本机配置指定，权重不随源码提交。
+- 本地 `results/`：跨会话诊断和验证材料。
 - `archive/experiments/`：过去的试验输出。
 - `archive/reports/`：日期报告、截图和验证证据。
 - `archive/backups/`：整理前已有的源码备份。
 - `archive/legacy_tools/`：已退出正式入口的旧辅助脚本。
 
 源码历史使用 Git。归档目录被 Git 忽略，也不会被会话目录扫描器当成数据会话。
+
+正式源码位于 `transbot/semantic_mapping/`。`project_paths.py` 为工作台、阅读器、录制 GUI、回传与模型入口统一解析路径；`paths.local.json` 引用保留在原处的数据和模型，环境变量可覆盖。保留 `BAGTOOLS_*`、ROS 节点及录制协议标识，以沿用现有配置和机器人脚本。

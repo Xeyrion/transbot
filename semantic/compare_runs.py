@@ -23,6 +23,7 @@ from semantic_replay import replay_geometry, validate_sources
 from semantic_storage import snapshot_map
 from viewer_core import frame_metadata, semantic_directory
 from run_pipeline import digest
+from project_paths import models_dir
 
 
 def save(path,data):
@@ -76,7 +77,7 @@ def statistics(folder):
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('baseline');ap.add_argument('--suite',required=True)
-    ap.add_argument('--seg-weights',default=os.path.join(ROOT,'models','yolo26s-seg.pt'))
+    ap.add_argument('--seg-weights',default=os.path.join(models_dir(),'yolo26s-seg.pt'))
     ap.add_argument('--no-dense',action='store_true')
     args=ap.parse_args()
     baseline=os.path.abspath(args.baseline);base=json.load(open(os.path.join(baseline,'run.json')))

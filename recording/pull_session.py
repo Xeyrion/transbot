@@ -11,6 +11,8 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from project_paths import default_data_dir
 
 
 def manifest_sha(local_root, group, name):
@@ -160,7 +162,7 @@ def main():
     ap.add_argument('--port', type=int, default=22)
     ap.add_argument('--jump')
     ap.add_argument('-r', '--remote', default=os.environ.get('REMOTE_DIR', '/home/jetson/bags'))
-    ap.add_argument('-l', '--local', default=os.environ.get('LOCAL_DIR', os.path.expanduser('~/robot_research/bagtools/bags')))
+    ap.add_argument('-l', '--local', default=default_data_dir())
     ap.add_argument('-p', '--pattern', default='cam_*.bag')
     ap.add_argument('--no-sidecars', action='store_true')
     ap.add_argument('--list', action='store_true')

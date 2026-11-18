@@ -9,10 +9,12 @@
 在控制机运行，输出目录必须尚不存在。同一会话的分卷自动合并：
 
 ```bash
-cd ~/robot_research/bagtools
+cd ~/transbot/semantic_mapping
 . /opt/ros/melodic/setup.bash
-python2 semantic/extract_images.py bags/structure_lab_11_11 \
-  datasets/cracks/structure_lab_11_11/images \
+DATA_ROOT="$(python3 project_paths.py)"
+# 输出到本机数据集目录；现有图片保持原位置
+python2 semantic/extract_images.py "$DATA_ROOT/structure_lab_11_11" \
+  /path/to/datasets/cracks/structure_lab_11_11/images \
   --fps 1 --max 1000 --diff 0 --format png --time-source record
 ```
 

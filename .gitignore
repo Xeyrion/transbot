@@ -15,4 +15,5 @@ __pycache__/
 *.part
 *.pgm
 *.bak
+paths.local.json
 .pytest_cache/

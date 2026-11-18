@@ -1,13 +1,13 @@
 # English demonstration entry
 
-On the control PC, open **Transbot Data Workbench (EN)** from the desktop or application menu.
+On the control PC, open **Transbot Semantic Mapping Studio (EN)** from the desktop or application menu.
 
 Command-line alternatives:
 
 ```bash
-~/robot_research/bagtools/run_en.sh             # English workbench
-~/robot_research/bagtools/run_en.sh --record    # English recording console
-~/robot_research/bagtools/run_en.sh --review    # English session browser
+~/transbot/semantic_mapping/run_en.sh             # English workbench
+~/transbot/semantic_mapping/run_en.sh --record    # English recording console
+~/transbot/semantic_mapping/run_en.sh --review    # English session browser
 ```
 
 The English entry sets `BAGTOOLS_LANG=en` for this process and its tools. It uses exactly the same code, data roots, session folders and recording logic as the Chinese entry. The original Chinese desktop entry remains available; changing the UI language does not rename any files or modify a recording.
@@ -18,4 +18,4 @@ Recorder scripts deliberately keep their Chinese source text. They run on the ro
 
 `tests/test_i18n.py` walks every `echo`/`print` literal in the recorder scripts and fails if any Chinese survives translation, so a newly added message cannot silently ship as Chinese-only.
 
-Chinese entry: `run.sh` or **Transbot 数据工作台**. For scripts, `BAGTOOLS_LANG=zh` / `en` explicitly selects a language before starting the program; live switching inside an already-open window is intentionally not required.
+Chinese entry: `run.sh` or **Transbot 语义建图工作台**. For scripts, `BAGTOOLS_LANG=zh` / `en` explicitly selects a language before starting the program; live switching inside an already-open window is intentionally not required.

@@ -1,13 +1,13 @@
 # 统一启动入口
 
-日常在控制机桌面双击 **Transbot 数据工作台**，或在应用菜单中搜索 Transbot。
+日常在控制机桌面双击 **Transbot 语义建图工作台**，或在应用菜单中搜索 Transbot。
 
 首页两个入口：
 
 - **录制控制**：打开采集、停止、状态与回传窗口。
 - **数据阅读**：打开会话列表，进入文件夹后分析、回放。
 
-它们默认共用控制机数据根目录 `~/robot_research/bagtools/bags`。工作台首页显示该路径，并可打开对应文件夹。机器人采集仍在机器人本地目录进行，回传后才出现在控制机的阅读器中。
+它们共用 `paths.local.json` 的 `data_dir`；现有控制机仍指向 `~/robot_research/bagtools/bags`，数据保持原位置。无本机配置时默认使用源码旁的 `bags/`。工作台首页显示该路径，并可打开对应文件夹。机器人采集仍在机器人本地目录进行，回传后才出现在控制机的阅读器中。
 
 工作台本身不会连接机器人或开始录制；点击“录制控制”才打开已有控制台。关闭工作台不会结束其他工具窗口或机器人录制，停止录制请使用录制控制台的“停止”。同一工作台不会重复启动仍在运行的工具窗口。
 
@@ -35,7 +35,7 @@ RGB 显示类别、置信度、有效深度和对应地图候选编号。框的�
 
 阅读器左右、右侧上下的分隔栏均可拖动；RGB 和深度图按实际面板大小等比例缩放，也允许放大小图。“画面优先”“地图优先”“均衡布局”可快速切换比例。地图使用整个画布，支持滚轮/加减号缩放、左键拖动平移；“全图”显示完整会话范围，“跟随机器人”恢复跟随。“放大地图”打开独立、可最大化的实时地图窗口。
 
-「地图图库」直接打开当前录制的 PNG 目录。「更多 → 最终地图」可重新导出，「更多 → 结果目录」打开当前语义运行及其日志相关资料。默认目录结构如下。
+「地图图库」直接打开当前录制的 PNG 目录。「更多 → 最终地图」可重新导出，「更多 → 结果目录」打开当前语义运行及其日志相关资料。数据目录结构如下（与源码位置独立）。
 
 ```text
 <录制文件夹>/
@@ -47,15 +47,15 @@ RGB 显示类别、置信度、有效深度和对应地图候选编号。框的�
     <运行名>/                       检测结果、样本及底图快照
 ```
 
-模型权重统一放在项目的 `models/`，常用方案在 `semantic_presets.py` 注册。批量重新导出可运行 `python3 semantic/export_maps.py --bag <bag>`。更新界面后请重新打开「数据阅读」。
+共享模型位置由 `paths.local.json` 的 `models_dir` 指定，未配置时使用项目的 `models/`；现有控制机继续引用原模型目录。常用方案在 `semantic_presets.py` 注册。批量重新导出可运行 `python3 semantic/export_maps.py --bag <bag>`。更新界面后请重新打开「数据阅读」。
 
 ## 命令行兼容
 
 ```bash
-~/robot_research/bagtools/run.sh                  # 工作台首页
-~/robot_research/bagtools/run.sh --record         # 直接打开录制控制
-~/robot_research/bagtools/run.sh --review         # 直接打开阅读器
-~/robot_research/bagtools/run.sh /path/to/bags     # 兼容原来的目录参数
+~/transbot/semantic_mapping/run.sh                  # 工作台首页
+~/transbot/semantic_mapping/run.sh --record         # 直接打开录制控制
+~/transbot/semantic_mapping/run.sh --review         # 直接打开阅读器
+~/transbot/semantic_mapping/run.sh /path/to/bags     # 兼容原来的目录参数
 ```
 
 `recording/run.sh`保留兼容，日常不再需要进入该目录寻找入口。

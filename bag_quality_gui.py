@@ -32,6 +32,7 @@ from map_display import Viewport, point_bounds, grid_bounds, draw_objects, expor
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 from semantic_presets import PRESETS
 from viewer_core import semantic_directory
+from project_paths import default_data_dir
 
 import tkinter as tk
 from i18n import language, tr
@@ -40,7 +41,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBE = os.path.join(HERE, 'bag_quality_probe.py')
 SERVER = os.path.join(HERE, 'bag_viewer_server.py')
-DEFAULT_DIR = os.path.expanduser('~/robot_research/bagtools/bags')
+DEFAULT_DIR = default_data_dir()
 PREVIEW = '/tmp/bag_quality_preview.ppm'
 SEMANTIC_PRESETS = {key: english if language() == 'en' else label for key, label, english, _, _ in PRESETS}
 
