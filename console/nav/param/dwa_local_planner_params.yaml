@@ -1,0 +1,50 @@
+DWAPlannerROS:
+  # Robot Velocity Limits (Ultra-Slow & Controlled Turning)
+  max_vel_x: 0.20
+  min_vel_x: 0.0                          # no reversing: 21% of the run was DWA backing up to fix heading
+  max_vel_y: 0.0
+  min_vel_y: 0.0
+
+  max_vel_trans: 0.20
+  min_vel_trans: 0.06           # Creep threshold to avoid abrupt stops
+  trans_stopped_vel: 0.025      # Clean velocity cut-off at 5cm arrival
+
+  max_vel_theta: 0.40           # 补偿后 0.28，实际约 0.32
+  min_vel_theta: 0.34           # 0.709 补偿后 0.24，刚好越过底盘过渡区
+  theta_stopped_vel: 0.04       # Lower cutoff for rotation completion
+
+  # Acceleration Limits (Gentle Ramp-Up & Ramp-Down)
+  acc_lim_x: 1.0
+  acc_lim_y: 0.0
+  acc_lim_theta: 3.0            # Soft angular acceleration; prevents sudden track scrub snaps       # Dampened to prevent wheel slip during rotation
+
+  # Goal Tolerances (5 cm Precision Target)
+  xy_goal_tolerance: 0.12       # 5 cm target window
+  yaw_goal_tolerance: 0.15      # ~7° heading tolerance
+  latch_xy_goal_tolerance: true # Locks linear position on arrival
+
+  # Forward Simulation (Optimized for Embedded CPU)
+  sim_time: 2.0
+  vx_samples: 15
+  vy_samples: 0
+  vtheta_samples: 30
+  sim_granularity: 0.025
+  controller_frequency: 10.0
+
+  # Trajectory Scoring Parameters
+  path_distance_bias: 32.0      # Rigid tracking of global path centerline
+  goal_distance_bias: 20.0      # Drive toward destination
+  occdist_scale: 0.03           # Balanced obstacle repulsion
+  forward_point_distance: 0.20  # Tightened for fine target approach
+  stop_time_buffer: 0.2
+  scaling_speed: 0.25
+  max_scaling_factor: 0.2
+
+  # Oscillation Prevention
+  oscillation_reset_dist: 0.06
+  oscillation_reset_angle: 0.05
+
+  # Debugging & Frame Settings (CPU Optimized)
+  publish_traj_pc: true         # Trajectory arcs visible in RViz
+  publish_cost_grid_pc: false   # Disabled to save Jetson CPU/memory bandwidth
+  global_frame_id: odom         # Local planner references continuous odom frame

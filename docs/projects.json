@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "path": "semantic_mapping",
+      "name_zh": "语义建图工作台",
+      "name_en": "Semantic Mapping Studio",
+      "readme": "semantic_mapping/README.md",
+      "readme_en": "semantic_mapping/README.en.md",
+      "scope_zh": "多模态录制、校验回传、二维建图与 RGB-D 语义回放；第一阶段演示完成",
+      "scope_en": "Recording, verified transfer, map rebuilding and RGB-D semantic replay; first demo stage complete",
+      "entrypoints": ["semantic_mapping/run.sh", "semantic_mapping/run_en.sh"]
+    },
+    {
+      "path": "console",
+      "name_zh": "PC 遥控台",
+      "name_en": "Remote console",
+      "readme": "console/README.md",
+      "scope_zh": "底盘、外设、机械臂、相机及在线建图导航",
+      "scope_en": "Chassis, peripherals, arm, cameras and online mapping/navigation",
+      "entrypoints": ["console/run_gui.sh"]
+    },
+    {
+      "path": "arm",
+      "name_zh": "2R 机械臂",
+      "name_en": "2R arm",
+      "readme": "arm/README.md",
+      "scope_zh": "实测运动学、Gazebo 仿真与真机同步",
+      "scope_en": "Measured kinematics, Gazebo and real-robot synchronization",
+      "entrypoints": ["arm/gazebo/run_simple.sh", "arm/robot_side/run_simple_agent.sh"]
+    },
+    {
+      "path": "wall_task",
+      "name_zh": "墙面任务台",
+      "name_en": "Wall task console",
+      "readme": "wall_task/README.md",
+      "scope_zh": "导航、对准与竖线规划；完整画线流程仍待真机验证",
+      "scope_en": "Navigation, alignment and vertical-line planning; full drawing workflow still needs robot validation",
+      "entrypoints": ["wall_task/task_gui/start_task.sh", "wall_task/task_gui/start_task_en.sh"]
+    }
+  ]
+}

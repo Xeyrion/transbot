@@ -8,6 +8,7 @@
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 import queue
@@ -59,6 +60,20 @@ except Exception:
     _HAS_PIL = False
 _CAM_OK = _HAS_IMG_MSG and _HAS_CV2 and _HAS_NP and _HAS_PIL
 
+# 建图/导航面板：三种模式共用一块地图画布。导入失败不致命——其他页签照常
+# 可用，只在建图页显示一行错误，比整个 GUI 起不来好。
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+try:
+    from nav.model import NavState
+    from nav.panel import MapPanel
+    _HAS_NAV = True
+except Exception as _nav_err:      # noqa: N816  (keep the reason for the log)
+    NavState = MapPanel = None
+    _HAS_NAV = False
+    NAV_IMPORT_ERROR = str(_nav_err)
+else:
+    NAV_IMPORT_ERROR = ''
+
 NODE = 'transbot_gui'
 STATE = {'ok': False, 'master': '', 'err': ''}
 
@@ -104,20 +119,23 @@ STRINGS = {
         ' 系统状态 ': ' System ',
 
         # --- 页1 底盘 ---
-        '底盘运动（单次指令，动作结束后自动制动）':
-            'Chassis Motion (single commands, auto-brake when finished)',
-        '前进 0.5 m': 'Forward 0.5 m',
-        '后退 0.5 m': 'Reverse 0.5 m',
-        '左转 45°': 'Left 45°',
-        '右转 45°': 'Right 45°',
-        '左转 90°': 'Left 90°',
-        '右转 90°': 'Right 90°',
+        '底盘运动（键盘控制）': 'Chassis Motion (keyboard)',
+        '前进 / 后退': 'forward / reverse',
+        '左转 / 右转': 'turn left / right',
+        '立即停车': 'stop now',
+        '空格': 'Space',
         '停止': 'Stop',
-        '连续速度控制': 'Continuous Speed Control',
+        '连续速度控制（键盘用这两个值）':
+            'Continuous speed (the keys use these two values)',
         '线速度 m/s': 'Linear speed (m/s)',
         '角速度 rad/s': 'Angular speed (rad/s)',
-        '启动': 'Start',
         '紧急停止': 'Emergency Stop',
+        '按住方向键持续运动，松开即停；只有本页可见时键盘才生效。'
+        '导航运行中按方向键会先取消目标再接管。'
+        '速度范围取自底盘驱动限幅（0.4 m/s、2.0 rad/s）。':
+            'Hold a key to move, release to stop. The keys only work while this '
+            'page is visible. Pressing one during navigation cancels the goal '
+            'first. Speed range follows the driver limits (0.4 m/s, 2.0 rad/s).',
         '速度范围取自底盘驱动限幅参数（线速度 0.4 m/s、角速度 2.0 rad/s）。'
                     '指令以 20 Hz 周期持续发布，5 秒无操作自动制动，'
                     '关闭窗口时同样会先发送制动指令。':
@@ -233,6 +251,23 @@ STRINGS = {
         'ROS Master 地址已复制到剪贴板':
             'ROS Master address copied to clipboard',
 
+        # --- 速度中继（键盘与导航共用一个 /cmd_vel 出口） ---
+        '○ 速度中继已就绪（键盘与导航共用 /cmd_vel）':
+            '○ Speed relay ready (keyboard and planner share /cmd_vel)',
+        '○ 速度中继已重新拉起':
+            '○ Speed relay restarted',
+        '✗ 速度中继没起来，遥控将直连 /cmd_vel':
+            '✗ Speed relay did not start; teleop goes straight to /cmd_vel',
+        '✗ 速度中继启动失败：%s': '✗ Failed to start the speed relay: %s',
+        '✗ 速度中继反复失败，遥控直连 /cmd_vel':
+            '✗ Speed relay keeps failing; teleop goes straight to /cmd_vel',
+        '✗ 制动失败：%s': '✗ Braking failed: %s',
+        '○ 已有速度中继在运行，直接沿用':
+            '○ An existing speed relay is already running; reusing it',
+        '○ 还没有图像帧：Astra 驱动可能没启动，点「启动Astra驱动」':
+            '○ No image frames yet: the Astra driver is probably not running; '
+            'press "Start Astra Driver"',
+
         # --- 通用指令日志 ---
         '⚠ 尚未连接至机器人，本次操作已忽略':
             '⚠ The robot is not connected; the command was ignored',
@@ -274,97 +309,146 @@ STRINGS = {
         # --- 建图与导航 ---
         '建图与导航': 'Mapping & Navigation',
         ' 建图与导航 ': ' Mapping & Navigation ',
-        '雷达状态（自启栈常驻，此处只检查）':
-            'LiDAR Status (runs with the boot stack; check only)',
-        '检查雷达': 'Check LiDAR',
-        '在线建图（gmapping，跑在机器人端）':
-            'Live Mapping (gmapping, runs on the robot)',
-        '开始建图': 'Start Mapping',
-        '停止建图': 'Stop Mapping',
-        '实时查看': 'Live View',
-        'RViz 看建图': 'View Mapping in RViz',
-        'RViz 看相机': 'View Camera in RViz',
-        '关闭 RViz': 'Close RViz',
-        '保存地图（仅建图中可点，正本存机器人）':
-            'Save Map (enabled while mapping; master copy stays on the robot)',
-        '地图名': 'Map Name',
-        '保存地图': 'Save Map',
-        '允许覆盖同名地图': 'Allow overwrite',
-        '同时下载到本机备份': 'Also back up locally',
-        '机器人目录：': 'Robot directory: ',
-        '查看存图（本地显示，不经过 ROS）':
-            'View Saved Map (local display, no ROS topics involved)',
-        '打开已有地图': 'Open Saved Map',
-        '自主导航（跑在机器人端，需先停止建图）':
-            'Autonomous Navigation (runs on the robot; stop mapping first)',
-        '地图': 'Map',
-        '刷新列表': 'Refresh List',
-        '开始导航': 'Start Navigation',
-        '停止导航': 'Stop Navigation',
-        '● /scan 有数据': '● /scan has data',
-        '○ /scan 无数据': '○ No data on /scan',
-        '● /map 有数据': '● /map has data',
-        '○ /map 无数据': '○ No data on /map',
-        '● move_base 在跑': '● move_base is running',
-        '○ move_base 未运行': '○ move_base is not running',
-        '→ 正在检查雷达…': '→ Checking the LiDAR…',
-        '✓ 雷达正常：/scan 有数据': '✓ LiDAR OK: /scan has data',
-        '✗ 雷达无数据，请检查机器人端自启栈（/scan）':
-            '✗ No LiDAR data; check the boot stack on the robot (/scan)',
-        '→ 正在机器人上启动建图…': '→ Starting mapping on the robot…',
-        '✓ 建图已启动，话题 %s': '✓ Mapping started, topic %s',
-        '○ 建图已在运行': '○ Mapping is already running',
-        '✗ 建图启动失败：%s': '✗ Failed to start mapping: %s',
-        '→ 正在停止建图…': '→ Stopping mapping…',
-        '✓ 建图已停止': '✓ Mapping stopped',
-        '✗ 建图停止失败：%s': '✗ Failed to stop mapping: %s',
+        '运行模式': 'Mode',
+        '启动': 'Start',
+        '纯建图': 'Mapping',
+        '纯导航': 'Navigation',
+        '边建图边导航': 'Map + navigate',
+        '保存为': 'Save as',
+        '使用地图（仅导航）': 'Use map (nav only)',
+        '保存地图': 'Save map',
+        '改名': 'Rename',
+        '刷新列表': 'Refresh',
+        '设初始位姿': 'Set pose',
+        '指定目标朝向': 'Goal heading',
+        '读当前': 'Read',
+        '发送位姿': 'Send pose',
+        '重新定位': 'Re-localise',
+        '手动': 'manual',
+        '点选': 'click',
+        '⚠ 已有同名地图，保存会覆盖':
+            '⚠ A map with this name already exists; saving overwrites it',
+        '○ 还没有位姿（等 TF 或 /amcl_pose）':
+            '○ No pose yet (waiting for TF or /amcl_pose)',
+        '○ 已读当前位姿 %.2f, %.2f, %.0f°':
+            '○ Current pose %.2f, %.2f, %.0f°',
+        '✗ 位姿要填数字：X / Y 用米，θ 用度':
+            '✗ Pose fields must be numbers: X/Y in metres, θ in degrees',
+        '✗ 还没连上 ROS，位姿发不出去':
+            '✗ Not connected to ROS yet; the pose cannot be sent',
+        '✗ 位姿下发失败：%s': '✗ Failed to send the pose: %s',
+        '✓ 初始位姿 (%.2f, %.2f, %.0f°) 已下发（%s）':
+            '✓ Initial pose (%.2f, %.2f, %.0f°) sent (%s)',
+        '○ 重新定位要在纯导航模式下、并且选好地图':
+            '○ Re-localising needs navigation mode with a map selected',
+        '✗ 找不到 relocalize.py': '✗ relocalize.py not found',
+        '✗ 还没有 /scan，等雷达出数据再试':
+            '✗ No /scan yet; wait for the lidar',
+        '● 正在重新定位…': '● Re-localising…',
+        '→ 重新定位中，约 30-90 s（全图似然场搜索）':
+            '→ Re-localising, 30-90 s (likelihood-field search over the map)',
+        '⚠ 似然只领先第二名 %.3f，可能有 180° 孪生解，'
+        '建议改用「设初始位姿」点两下':
+            '⚠ The best match leads the runner-up by only %.3f; a 180° twin '
+            'is likely. Use "set pose" and click twice instead.',
+        '○ 似然领先 %.3f，解唯一':
+            '○ Likelihood leads by %.3f; the solution is unique',
+        '✗ 重新定位失败：%s': '✗ Re-localise failed: %s',
+        '○ 目标位置 (%.2f, %.2f)，再点一下定朝向':
+            '○ Goal position (%.2f, %.2f); click again to set the heading',
+        '⚠ 电池 %.1f V，低于 11 V 时底盘只出 25%% 的速度，'
+        '看着像"按了没反应"':
+            '⚠ Battery %.1f V; below 11 V the chassis delivers about 25 %% of '
+            'the commanded speed, which looks like "nothing happened"',
+        '⚠ 定位不确定度 σ=%.2f/%.2f m 偏大：先用「重新定位」，'
+        '或用「设初始位姿」点两下':
+            '⚠ Localisation sigma is %.2f/%.2f m: use "re-localise", or '
+            '"set pose" and click twice',
+        '「设初始位姿」点两下：位置→朝向；'
+        '「重新定位」重找位置':
+            '"Set pose": two clicks. '
+            '"Re-localise": match the scan against the map.',
+        '键盘遥控': 'Keyboard teleop',
+        'W/S 前后，A/D 转向，空格停': 'W/S drive, A/D turn, space stops',
+        '拖动 = 平移　滚轮 = 缩放　Shift+拖动 = 旋转　'
+        '[ ] 旋转　+ - 缩放　双击 = 复位':
+            'Drag = pan   Wheel = zoom   Shift+drag = rotate   '
+            '[ ] = rotate   + - = zoom   Double click = reset',
+        '● 未启动': '● Not running',
+        '位姿': 'Pose',
+        '旋转': 'Rotation',
+        '复位': 'Reset',
+        '相机预览': 'Camera',
+        '相机未开启': 'Camera off',
+        '相机无数据': 'No camera data',
+        '○ 相机没有数据：Astra 驱动多半没起，'
+        '去「视觉传感器」页点启动 Astra':
+            '○ No camera data: the Astra driver is probably not '
+            'running. Start it on the Vision Sensors tab.',
+        '已知': 'Known',
+        '覆盖率': 'Coverage',
+        '目标': 'Goal',
+        '缩放': 'Zoom',
+        '● 正在启动…': '● Starting…',
+        '● 正在停止…': '● Stopping…',
+        '● 建图中': '● Mapping',
+        '● 导航中': '● Navigating',
+        '● 边建图边导航': '● Mapping + navigating',
+        '○ 从空地图开始建，不会加载或修改已有地图':
+            '○ Mapping starts from an empty map; the selected map is '
+            'not loaded or modified',
+        '○ 地图保存名：%s（可随时改名）':
+            '○ This map will be saved as %s (rename it any time)',
+        '○ 地图 %s；定位不准就在地图上点两下设初始位姿':
+            '○ Map %s; if the pose looks wrong, click twice on the map to '
+            'set the initial pose',
+        '○ 地图列表：%s': '○ Maps: %s',
+        '（空）': '(none)',
+        '✗ 读取地图列表失败：%s': '✗ Failed to read the map list: %s',
         '→ 正在保存地图 %s …': '→ Saving map %s…',
-        '✓ 地图已保存：%s（机器人端）': '✓ Map saved: %s (on the robot)',
-        '✗ 地图保存失败：%s': '✗ Failed to save the map: %s',
-        '✗ 同名地图已存在，勾选“允许覆盖”或换个名字：%s':
-            '✗ A map with this name exists; tick "allow overwrite" or rename: %s',
-        '✓ 已备份到本机：%s': '✓ Backed up to this host: %s',
-        '✗ 本机备份失败：%s': '✗ Failed to back up to this host: %s',
-        '→ 正在刷新地图列表…': '→ Refreshing the map list…',
-        '○ 地图列表：%s': '○ Map list: %s',
-        '（空）': '(empty)',
-        '→ 正在打开地图 %s …': '→ Opening map %s…',
-        '✗ 地图打开失败：%s': '✗ Failed to open the map: %s',
-        '→ 正在机器人上启动导航（地图 %s）…':
-            '→ Starting navigation on the robot (map %s)…',
-        '✓ 导航已启动（地图 %s）': '✓ Navigation started (map %s)',
-        '✗ 导航启动失败：%s': '✗ Failed to start navigation: %s',
-        '→ 正在停止导航…': '→ Stopping navigation…',
-        '✓ 导航已停止': '✓ Navigation stopped',
-        '✗ 导航停止失败：%s': '✗ Failed to stop navigation: %s',
-        '○ 建图/导航操作进行中，请稍候':
-            '○ A mapping/navigation operation is in progress, please wait',
-        '○ 请先开始建图再保存': '○ Start mapping before saving',
+        '✓ 地图已保存：maps/%s.yaml': '✓ Map saved: maps/%s.yaml',
+        '✗ 保存失败：%s': '✗ Failed to save the map: %s',
         '○ 请先输入地图名': '○ Enter a map name first',
-        '○ 请先选择地图': '○ Select a map first',
-        '○ 建图进行中，请先停止建图再导航':
-            '○ Mapping is running; stop it before navigation',
-        '○ 导航进行中，请先停止导航再建图':
-            '○ Navigation is running; stop it before mapping',
-        '→ 正在本机打开 RViz（%s）…': '→ Opening RViz on this host (%s)…',
-        '✓ RViz 已打开': '✓ RViz is open',
-        '○ RViz 已在运行': '○ RViz is already running',
-        '✗ RViz 启动失败：%s': '✗ Failed to start RViz: %s',
-        '✗ 找不到 RViz 配置：%s': '✗ RViz config not found: %s',
-        '○ RViz 已关闭': '○ RViz is closed',
-        '✗ 地图名非法，只允许字母/数字/下划线/点/横线/空格：%s':
-            '✗ Invalid map name (letters/digits/underscore/dot/dash/space only): %s',
-        '✗ 建图停止后 /map 仍有数据，请在机器人上检查 rosnode list':
-            '✗ /map still has data after stopping; check rosnode list on the robot',
-        '✗ 导航停止后 move_base 仍在，请在机器人上检查 rosnode list':
-            '✗ move_base is still running after stopping; '
-            'check rosnode list on the robot',
-        '✗ move_base 未上线，详见机器人 %s':
-            '✗ move_base did not come up; see %s on the robot',
-        '✗ 地图名非法：%s': '✗ Invalid map name: %s',
-        '✗ 存图后校验失败，未生成 %s.yaml/pgm，详见机器人 /tmp/gui_mapsave.log':
-            '✗ Map verification failed, %s.yaml/pgm were not created; '
-            'see /tmp/gui_mapsave.log on the robot',
+        '○ 没有叫 %s 的地图，先保存一次':
+            '○ There is no map called %s yet; save one first',
+        '地图已存在': 'Map already exists',
+        '已有同名地图 %s，覆盖它？':
+            'A map called %s already exists. Overwrite it?',
+        '新地图名（%s）': 'New map name (was %s)',
+        '✓ 已改名：%s → %s': '✓ Renamed: %s → %s',
+        '✗ 改名失败：%s': '✗ Failed to rename: %s',
+        '✗ 启动失败：%s': '✗ Failed to start: %s',
+        '✓ 已停止': '✓ Stopped',
+        '✗ 停止失败：%s': '✗ Failed to stop: %s',
+        '○ 还没有地图数据': '○ No map data yet',
+        '○ 初始位置 (%.2f, %.2f)，再点一下定朝向':
+            '○ Position (%.2f, %.2f); click again to set the heading',
+        '✓ 初始位姿 (%.2f, %.2f, %.0f°) 已下发':
+            '✓ Initial pose (%.2f, %.2f, %.0f°) sent',
+        '○ 当前模式不接收导航目标':
+            '○ This mode does not take navigation goals',
+        '✗ 目标点不可用（%s），换一个已知空闲区域':
+            '✗ Goal rejected (%s); pick a spot that is known and free',
+        '✗ 这一点不在已知地图内（%s），请点在地图上；'
+        '要精确坐标就直接填 X/Y/θ':
+            '✗ That point is not inside the known map (%s); click on the map, '
+            'or type X/Y/θ for an exact pose',
+        '→ 目标 (%.2f, %.2f) %.0f°': '→ Goal (%.2f, %.2f) %.0f°',
+        '○ 目标已取消': '○ Goal cancelled',
+        '○ 键盘遥控已开启（W/S 前后，A/D 转向，空格停）':
+            '○ Teleop on (W/S drive, A/D turn, space stops)',
+        '○ 键盘遥控已关闭': '○ Teleop off',
+        '○ 已停车': '○ Stopped',
+        '○ 手动遥控接管，导航目标已取消':
+            '○ Teleop took over; the navigation goal was cancelled',
+        '✗ 遥控指令失败：%s': '✗ Teleop command failed: %s',
+        '○ 地图订阅已建立': '○ Map subscriptions are up',
+        '✗ 订阅失败：%s': '✗ Failed to subscribe: %s',
+        '✓ 建图/导航栈已停止': '✓ Mapping/navigation stack stopped',
+        '✗ 停止建图/导航栈失败：%s':
+            '✗ Failed to stop the mapping/navigation stack: %s',
+        '✗ 建图导航面板初始化失败：%s':
+            '✗ The map panel failed to initialise: %s',
 
         # --- 机械臂 ---
         '✓ 机械臂关节角度：%s': '✓ Arm joint angles: %s',
@@ -480,7 +564,6 @@ class RobotROS:
         self._cmd_lock = threading.Lock()
         self._arm_lock = threading.Lock()
         self._astra_lock = threading.Lock()
-        self._map_lock = threading.Lock()  # 建图/导航远端操作互斥（两者也互斥）
         self._inited = False
         # 运动代次：每次新的运动命令 +1，进行中的命令发现代次变了就立刻刹车退出。
         # 解决"连点两个前进会提前急停 / 前进中点后退会中途反向"——旧的运动必须让位。
@@ -499,7 +582,12 @@ class RobotROS:
             # disable_signals=True 是关键：Tk 程序不能让 rospy 抢 signal handler
             rospy.init_node(NODE, anonymous=True, disable_signals=True)
             self._inited = True
+        # 键盘永远发 /cmd_vel_teleop，由常驻中继和规划器一起仲裁；
+        # 中继没起来时才退回直连 /cmd_vel（见 _publish_cmd）。
         self.cmd_pub = rospy.Publisher('/cmd_vel', geometry_msgs.msg.Twist, queue_size=2)
+        self.cmd_pub_teleop = rospy.Publisher(
+            '/cmd_vel_teleop', geometry_msgs.msg.Twist, queue_size=2)
+        self.relay_up = False
         self.servo_pub = rospy.Publisher('/PWMServo', PWMServo, queue_size=10)
         self.arm_pub = rospy.Publisher('/TargetAngle', Arm, queue_size=10)
         self.rgb_srv = rospy.ServiceProxy('/RGBLight', RGBLight)
@@ -545,7 +633,8 @@ class RobotROS:
             tw = geometry_msgs.msg.Twist()
             tw.linear.x = x
             tw.angular.z = z
-            self.cmd_pub.publish(tw)
+            pub = self.cmd_pub_teleop if self.relay_up else self.cmd_pub
+            pub.publish(tw)
 
     def _new_motion(self):
         """开始一段运动：抢下运动权，返回本次代号。旧代号立刻失效。"""
@@ -606,21 +695,23 @@ class RobotROS:
         self._publish_cmd(0, 0)
         return True
 
-    def manual(self, lx, az, hold=5.0):
+    def manual(self, lx, az, hold=5.0, on_done=None):
         """手动微调：20Hz 重发 /cmd_ver，超时或被抢占自动停。
 
         之前只发一条就撒手，驱动认的是最后一条速度，GUI 一关/一崩车就一路开下去。
         驱动侧没有看门狗，所以这个重发+超时必须由 GUI 自己兜住。
         hold<=0 表示持续发到 stop()/窗口关闭。
         """
-        self._hold_stop.set()          # 停掉上一次的重发
-        self._hold_stop.clear()
+        # 每次运动用一个新的 Event：老代码对同一个 Event set() 再 clear()，
+        # 旧线程醒来时标志已经清掉，会继续按旧速度发，和新命令交替下发。
+        prev_evt, stop_evt = self._hold_stop, threading.Event()
+        self._hold_stop = stop_evt
+        prev_evt.set()
         lx = max(-self.LIN_MAX, min(self.LIN_MAX, float(lx)))
         az = max(-self.ANG_MAX, min(self.ANG_MAX, float(az)))
         if abs(lx) < 1e-3 and abs(az) < 1e-3:
             return self.stop()
         gen = self._new_motion()
-        stop_evt = self._hold_stop
         t_end = time.time() + hold if hold and hold > 0 else None
 
         def loop():
@@ -640,6 +731,11 @@ class RobotROS:
                 if not self._motion_stale(gen):
                     try:
                         self._publish_cmd(0, 0)
+                    except Exception:
+                        pass
+                if on_done is not None:
+                    try:
+                        on_done()
                     except Exception:
                         pass
 
@@ -842,8 +938,8 @@ class RobotROS:
             'PID=$(cat {pid} 2>/dev/null); [ -n "$PID" ] && kill "$PID" 2>/dev/null; '
             '{term} sleep 2; {kill9} '
             'source /opt/ros/melodic/setup.bash; '
-            'source ~/software/transbot_library/devel/setup.bash; '
             'source ~/transbot_ws/devel/setup.bash; '
+            'source ~/software/transbot_library/devel/setup.bash; '
             'export ROS_MASTER_URI=http://{h}:11311; export ROS_IP={h}; '
             'echo y 2>/dev/null | timeout 15 rosnode cleanup >/dev/null 2>&1; '
             'rm -f {pid}; echo CLEANED'
@@ -867,8 +963,8 @@ class RobotROS:
         self._astra_clean_remote()
         remote = (
             'source /opt/ros/melodic/setup.bash; '
-            'source ~/software/transbot_library/devel/setup.bash; '
             'source ~/transbot_ws/devel/setup.bash; '
+            'source ~/software/transbot_library/devel/setup.bash; '
             'export ROS_MASTER_URI=http://{h}:11311; export ROS_IP={h}; '
             'rm -f {pid}; '
             '(nohup roslaunch {launch} >{log} 2>&1 & echo $! > {pid}); echo LAUNCHED'
@@ -926,239 +1022,6 @@ class RobotROS:
         finally:
             self._astra_lock.release()
 
-    # ---- 建图 / 导航远启（同样跑在机器人端，复用 Astra 的双 SSH 结构） ----
-    # 建图与导航都要稳定吃 /scan（WiFi 丢包 + 抢资源），必须跑在机器人端。
-    # launch 实测（机器人 ~/transbot_ws/src/transbot_nav/launch）：
-    #   建图：transbot_map.launch map_type:=gmapping open_rviz:=false
-    #         → 节点 slam_gmapping（要稳定吃 /scan+/odom）
-    #   导航：transbot_navigation.launch map:=<名> open_rviz:=false
-    #         → map_server + amcl + move_base + send_mark
-    # 自杀防护与 Astra 同理：pkill 和字面 launch 名绝不进同一个远端 shell。
-    MAP_DIR = '~/transbot_ws/src/transbot_nav/maps'
-    MAP_LAUNCH = 'transbot_nav transbot_map.launch map_type:=gmapping open_rviz:=false'
-    MAP_PID_FILE = '/tmp/gui_map.pid'
-    MAP_LOG_FILE = '/tmp/gui_map.log'
-    MAP_KILL_PATTERNS = ('[t]ransbot_map.launch', '[s]lam_gmapping')
-    NAV_LAUNCH_TMPL = 'transbot_nav transbot_navigation.launch map:={m} open_rviz:=false'
-    NAV_PID_FILE = '/tmp/gui_nav.pid'
-    NAV_LOG_FILE = '/tmp/gui_nav.log'
-    NAV_KILL_PATTERNS = ('[t]ransbot_navigation.launch', '[m]ove_base',
-                         '[a]mcl', '[m]ap_server', '[s]end_mark')
-    MAP_TOPIC = '/map'
-    SCAN_TOPIC = '/scan'
-
-    def _stack_clean(self, pid_file, patterns, timeout=40):
-        """清场：TERM → sleep → KILL → rosnode cleanup → 删 PID。单次 SSH，
-        cmdline 里只有方括号 pattern（见 _astra_clean_remote 注释）。"""
-        term = ' '.join('pkill -f "{p}" 2>/dev/null;'.format(p=p)
-                        for p in patterns)
-        kill9 = ' '.join('pkill -9 -f "{p}" 2>/dev/null;'.format(p=p)
-                         for p in patterns)
-        h = self._robot_host()
-        remote = (
-            'PID=$(cat {pid} 2>/dev/null); [ -n "$PID" ] && kill "$PID" 2>/dev/null; '
-            '{term} sleep 2; {kill9} '
-            'source /opt/ros/melodic/setup.bash; '
-            'source ~/software/transbot_library/devel/setup.bash; '
-            'source ~/transbot_ws/devel/setup.bash; '
-            'export ROS_MASTER_URI=http://{h}:11311; export ROS_IP={h}; '
-            'echo y 2>/dev/null | timeout 15 rosnode cleanup >/dev/null 2>&1; '
-            'rm -f {pid}; echo CLEANED'
-        ).format(pid=pid_file, h=h, term=term, kill9=kill9)
-        r = self._ssh_run(remote, timeout=timeout)
-        if r.returncode != 0:
-            raise RuntimeError((r.stderr.strip() or 'ssh command failed'))
-
-    def _stack_launch(self, launch, pid_file, log_file, timeout=30):
-        """拉起：独立 SSH（字面 launch 名，无 pkill，安全）。"""
-        h = self._robot_host()
-        remote = (
-            'source /opt/ros/melodic/setup.bash; '
-            'source ~/software/transbot_library/devel/setup.bash; '
-            'source ~/transbot_ws/devel/setup.bash; '
-            'export ROS_MASTER_URI=http://{h}:11311; export ROS_IP={h}; '
-            'rm -f {pid}; '
-            '(nohup roslaunch {launch} >{log} 2>&1 & echo $! > {pid}); echo LAUNCHED'
-        ).format(h=h, launch=launch, pid=pid_file, log=log_file)
-        r = self._ssh_run(remote, timeout=timeout)
-        if r.returncode != 0:
-            raise RuntimeError((r.stderr.strip() or 'ssh command failed'))
-
-    def _stack_node_present(self, name, tries=10, interval=2.0):
-        """轮询远端 rosnode list 是否出现某节点（导航验证用）。"""
-        h = self._robot_host()
-        remote = ('source /opt/ros/melodic/setup.bash; '
-                  'export ROS_MASTER_URI=http://{h}:11311; '
-                  'rosnode list 2>/dev/null | grep -qx "{n}"').format(h=h, n=name)
-        for _ in range(max(1, tries)):
-            r = self._ssh_run(remote, timeout=15)
-            if r.returncode == 0:
-                return True
-            time.sleep(interval)
-        return False
-
-    # -- 雷达 / 地图话题探针（本机订阅，只读） --
-    def scan_ok(self, timeout=4):
-        if not _HAS_SCAN:
-            return False
-        try:
-            rospy.wait_for_message(self.SCAN_TOPIC, RosScan, timeout=timeout)
-            return True
-        except Exception:
-            return False
-
-    def map_ok(self, timeout=4):
-        try:
-            rospy.wait_for_message(self.MAP_TOPIC, nav_msgs.msg.OccupancyGrid,
-                                   timeout=timeout)
-            return True
-        except Exception:
-            return False
-
-    # -- 地图文件（正本在机器人 MAP_DIR） --
-    @staticmethod
-    def _valid_map_name(name):
-        return bool(re.match(r'^[\w][\w\-. ]*$', name or '')) and '/' not in (name or '')
-
-    def map_list(self):
-        """列出机器人地图目录下的地图名（不带 .yaml 后缀）。"""
-        remote = 'ls {d}/*.yaml 2>/dev/null'.format(d=self.MAP_DIR)
-        r = self._ssh_run(remote, timeout=20)
-        if r.returncode != 0:
-            return []
-        names = []
-        for line in (r.stdout or '').splitlines():
-            base = line.strip().rsplit('/', 1)[-1]
-            if base.endswith('.yaml'):
-                names.append(base[:-5])
-        return sorted(set(names))
-
-    def map_exists(self, name):
-        r = self._ssh_run('test -e {d}/{n}.yaml -a -e {d}/{n}.pgm'.format(
-            d=self.MAP_DIR, n=name), timeout=15)
-        return r.returncode == 0
-
-    def map_save(self, name, timeout=60):
-        """在机器人上执行 map_saver，要求调用方已确认覆盖策略。"""
-        if not self._valid_map_name(name):
-            raise RuntimeError(L('✗ 地图名非法，只允许字母/数字/下划线/点/横线/空格：%s') % name)
-        h = self._robot_host()
-        remote = (
-            'source /opt/ros/melodic/setup.bash; '
-            'source ~/software/transbot_library/devel/setup.bash; '
-            'source ~/transbot_ws/devel/setup.bash; '
-            'export ROS_MASTER_URI=http://{h}:11311; export ROS_IP={h}; '
-            'rosrun map_server map_saver -f {d}/{n} >/tmp/gui_mapsave.log 2>&1'
-        ).format(h=h, d=self.MAP_DIR, n=name)
-        r = self._ssh_run(remote, timeout=timeout)
-        if r.returncode != 0:
-            raise RuntimeError((r.stderr.strip() or 'ssh command failed'))
-        if not self.map_exists(name):
-            raise RuntimeError(L('✗ 存图后校验失败，未生成 %s.yaml/pgm，'
-                                 '详见机器人 /tmp/gui_mapsave.log') % name)
-        return True
-
-    def map_fetch(self, name, local_path, timeout=30):
-        """把机器人的 pgm 拉到本机（查看用，看完即删，不留分叉）。"""
-        if shutil.which('sshpass') is None:
-            raise RuntimeError('sshpass not installed and no key auth configured')
-        env = dict(os.environ, SSHPASS=self._ssh_pass())
-        cmd = ['sshpass', '-e', 'scp', '-o', 'StrictHostKeyChecking=no',
-               '-o', 'ConnectTimeout=8',
-               '%s@%s:%s/%s.pgm' % (self.ROBOT_USER, self._robot_host(),
-                                    self.MAP_DIR, name),
-               local_path]
-        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           universal_newlines=True, timeout=timeout, env=env)
-        if r.returncode != 0 or not os.path.exists(local_path):
-            raise RuntimeError((r.stderr.strip() or 'scp failed'))
-        return local_path
-
-    def map_backup(self, name, local_dir, timeout=60):
-        """yaml+pgm 各备份一份到本机目录（冷备份，不参与导航）。"""
-        if shutil.which('sshpass') is None:
-            raise RuntimeError('sshpass not installed and no key auth configured')
-        env = dict(os.environ, SSHPASS=self._ssh_pass())
-        for ext in ('.yaml', '.pgm'):
-            cmd = ['sshpass', '-e', 'scp', '-o', 'StrictHostKeyChecking=no',
-                   '-o', 'ConnectTimeout=8',
-                   '%s@%s:%s/%s%s' % (self.ROBOT_USER, self._robot_host(),
-                                      self.MAP_DIR, name, ext),
-                   local_dir + '/']
-            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               universal_newlines=True, timeout=timeout, env=env)
-            if r.returncode != 0:
-                raise RuntimeError((r.stderr.strip() or 'scp failed: %s' % ext))
-        return True
-
-    # -- 建图启停 --
-    def map_start(self, wait=20):
-        if not self._map_lock.acquire(blocking=False):
-            raise RuntimeError('another mapping/nav operation is still in progress')
-        try:
-            if self.map_ok(timeout=4):
-                return self.MAP_TOPIC
-            self._stack_clean(self.MAP_PID_FILE, self.MAP_KILL_PATTERNS)
-            self._stack_launch(self.MAP_LAUNCH, self.MAP_PID_FILE, self.MAP_LOG_FILE)
-            try:
-                rospy.wait_for_message(self.MAP_TOPIC, nav_msgs.msg.OccupancyGrid,
-                                       timeout=wait)
-            except Exception as e:
-                raise RuntimeError('no data on %s within %ss (%s)'
-                                   % (self.MAP_TOPIC, wait, e))
-            return self.MAP_TOPIC
-        finally:
-            self._map_lock.release()
-
-    def map_stop(self, verify=True):
-        if not self._map_lock.acquire(blocking=False):
-            raise RuntimeError('another mapping/nav operation is still in progress')
-        try:
-            self._stack_clean(self.MAP_PID_FILE, self.MAP_KILL_PATTERNS)
-            time.sleep(2.0)
-            if verify and self.map_ok(timeout=4):
-                raise RuntimeError(L('✗ 建图停止后 /map 仍有数据，'
-                                     '请在机器人上检查 rosnode list'))
-            return True
-        finally:
-            self._map_lock.release()
-
-    # -- 导航启停 --
-    def nav_start(self, name, wait=25):
-        if not self._valid_map_name(name):
-            raise RuntimeError(L('✗ 地图名非法：%s') % name)
-        if not self._map_lock.acquire(blocking=False):
-            raise RuntimeError('another mapping/nav operation is still in progress')
-        try:
-            self._stack_clean(self.NAV_PID_FILE, self.NAV_KILL_PATTERNS)
-            self._stack_launch(self.NAV_LAUNCH_TMPL.format(m=name),
-                               self.NAV_PID_FILE, self.NAV_LOG_FILE)
-            # move_base 节点出现 + /map（map_server 静态发布，latched）有数据
-            if not self._stack_node_present('/move_base', tries=10, interval=2.0):
-                raise RuntimeError(L('✗ move_base 未上线，详见机器人 %s')
-                                   % self.NAV_LOG_FILE)
-            try:
-                rospy.wait_for_message(self.MAP_TOPIC, nav_msgs.msg.OccupancyGrid,
-                                       timeout=wait)
-            except Exception as e:
-                raise RuntimeError('no data on %s within %ss (%s)'
-                                   % (self.MAP_TOPIC, wait, e))
-            return True
-        finally:
-            self._map_lock.release()
-
-    def nav_stop(self, verify=True):
-        if not self._map_lock.acquire(blocking=False):
-            raise RuntimeError('another mapping/nav operation is still in progress')
-        try:
-            self._stack_clean(self.NAV_PID_FILE, self.NAV_KILL_PATTERNS)
-            time.sleep(2.0)
-            if verify and self._stack_node_present('/move_base', tries=2, interval=2.0):
-                raise RuntimeError(L('✗ 导航停止后 move_base 仍在，'
-                                     '请在机器人上检查 rosnode list'))
-            return True
-        finally:
-            self._map_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -1388,6 +1251,172 @@ def decode_depth_colormap(msg):
 # ---------------------------------------------------------------------------
 # GUI
 # ---------------------------------------------------------------------------
+class DriveRelay(object):
+    """The single writer of /cmd_vel.
+
+    move_base publishes /cmd_vel_raw, the keyboard publishes /cmd_vel_teleop,
+    and helpers/cmd_vel_scale.py arbitrates: teleop wins for a short window,
+    the planner is forwarded otherwise. One process, one output topic, so the
+    driver never sees two 20 Hz streams alternating.
+
+    Started with the console (not with the nav stack) so keyboard driving works
+    the same whether navigation is running or not. If it dies the GUI notices
+    within a second, restarts it, and meanwhile publishes teleop straight to
+    /cmd_vel so the robot still moves.
+    """
+
+    LOG_PATH = '/tmp/transbot_relay.log'
+
+    def __init__(self, helpers_dir, log):
+        self.script = os.path.join(helpers_dir, 'cmd_vel_scale.py')
+        self.log = log
+        self.proc = None
+        self.last_start = 0.0
+        self._lock = threading.Lock()   # start()/stop() from two threads
+        # 第二个控制台实例不要抢中继：/cmd_vel 只允许一个写入者，
+        # 两个实例各杀各的中继会互相踢，日志里刷"已重新拉起"。
+        self.adopted = False
+        self._adopt_check = 0.0
+
+    def _relay_node_up(self):
+        """Cheap liveness probe for a relay we did not spawn ourselves."""
+        try:
+            out = subprocess.run(['rosnode', 'list'], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL,
+                                 universal_newlines=True, timeout=6).stdout
+        except Exception:
+            return False
+        return any(n.startswith('/cmd_vel_scale') for n in out.split())
+
+    def _relay_publishing(self):
+        """Stronger check: is something actually publishing /cmd_vel as a relay?"""
+        try:
+            out = subprocess.run(['rostopic', 'info', '/cmd_vel'],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 universal_newlines=True, timeout=8).stdout
+        except Exception:
+            return False
+        if 'Publishers' not in out:
+            return False
+        seg = out.split('Publishers:')[1].split('Subscribers:')[0]
+        return 'cmd_vel_scale' in seg
+
+    def alive(self):
+        if self.proc is not None:
+            return self.proc.poll() is None
+        if not self.adopted:
+            return False
+        # 借用的中继：每 4 秒确认一次节点还在，别一直假装它活着
+        now = time.time()
+        if now - self._adopt_check < 4.0:
+            return True
+        self._adopt_check = now
+        if not self._relay_node_up():
+            self.adopted = False
+            return False
+        return True
+
+    def last_error(self, n=3):
+        """Last lines of the relay's own stderr, for the log panel."""
+        try:
+            with open(self.LOG_PATH, 'r', errors='replace') as fh:
+                lines = [l.strip() for l in fh.read().strip().splitlines() if l.strip()]
+            return ' | '.join(lines[-n:])
+        except Exception:
+            return ''
+
+    def start(self, quiet=False):
+        """(Re)start the relay. Kills a stale one first, ours or not."""
+        with self._lock:
+            if not os.path.isfile(self.script):
+                if not quiet:
+                    self.log(L('✗ 速度中继启动失败：%s') % ('script missing'))
+                return False
+            self._stop_locked()
+            # 已经有中继在跑（另一个控制台实例，或上次没退干净的）就沿用：
+            # 杀掉再起一个，两个窗口会互相踢。
+            if self._relay_publishing():
+                self.adopted = True
+                self._adopt_check = time.time()
+                self.last_start = time.time()
+                if not quiet:
+                    self.log(L('○ 已有速度中继在运行，直接沿用'))
+                return True
+            self.adopted = False
+            # a relay left over from a crashed session would double-publish
+            subprocess.call(['pkill', '-f', '[c]md_vel_scale.py'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Keep the child's own output: without it a crash is invisible and
+            # the watchdog just restarts it in a loop.
+            try:
+                err = open(self.LOG_PATH, 'w')
+            except Exception:
+                err = subprocess.DEVNULL
+            try:
+                self.proc = subprocess.Popen(
+                    ['python3', self.script,
+                     '--in-topic', '/cmd_vel_raw',
+                     '--out-topic', '/cmd_vel',
+                     '--angular-scale', '0.709',
+                     '--teleop-topic', '/cmd_vel_teleop'],
+                    stdout=err, stderr=subprocess.STDOUT,
+                    start_new_session=True)
+            except Exception as e:
+                if not quiet:
+                    self.log(L('✗ 速度中继启动失败：%s') % e)
+                self.proc = None
+                return False
+            finally:
+                try:
+                    if err is not subprocess.DEVNULL:
+                        err.close()
+                except Exception:
+                    pass
+            self.last_start = time.time()
+            time.sleep(0.8)
+            ok = self.alive()
+            if ok and not quiet:
+                self.log(L('○ 速度中继已就绪（键盘与导航共用 /cmd_vel）'))
+            elif not ok and not quiet:
+                self.log(L('✗ 速度中继没起来，遥控将直连 /cmd_vel'))
+                tail = self.last_error()
+                if tail:
+                    self.log('   ' + tail)
+            return ok
+
+    def stop(self):
+        with self._lock:
+            self._stop_locked()
+
+    def _stop_locked(self):
+        if self.adopted:
+            # 借来的中继不归我们关：另一个窗口还在用它
+            self.adopted = False
+            return
+        p, self.proc = self.proc, None
+        if p is None or p.poll() is not None:
+            return
+        try:
+            if os.getpgid(p.pid) != os.getpgid(0):
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            else:
+                p.terminate()
+        except Exception:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+
+
+# 底盘页的方向键：值为 (线速度符号, 角速度符号)
+MOVE_KEYMAP = {
+    'w': (1, 0), 'up': (1, 0),
+    's': (-1, 0), 'down': (-1, 0),
+    'a': (0, 1), 'left': (0, 1),
+    'd': (0, -1), 'right': (0, -1),
+}
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -1409,30 +1438,30 @@ class App:
         # 各关节上一次已知角度，用来按位移估 run_time（避免大角度动作被时间截断）
         self._arm_cur = {7: 90.0, 8: 100.0, 9: 150.0}
         self._cam_tk_rgb = self._cam_tk_depth = None
+        self._nav_cam_t = None
+        self._nav_cam_photo = None
         self._cam_last_rgb_t = self._cam_last_depth_t = 0.0
         self._cam_fps_n = 0
         self._cam_fps_t0 = time.time()
         self._cam_fps = 0.0
-        # ---- 建图与导航页状态（放 __init__：切语言重建控件时保持） ----
-        self._t_scan = tk.StringVar(value='')
-        self._t_mapstat = tk.StringVar(value='')
-        self._t_navstat = tk.StringVar(value='')
-        self._t_savename = tk.StringVar(value='myroom')
-        self._t_navmap = tk.StringVar(value='')
-        self._t_backup = tk.BooleanVar(value=False)
-        self._t_overwrite = tk.BooleanVar(value=False)
-        self._map_names = []          # 机器人 maps/ 下拉缓存
-        self._mn_state = 'idle'       # idle | mapping | navigating
-        self._mn_lock = threading.Lock()
-        self._rviz = {}               # kind('map'/'cam') -> Popen
-        self._map_btns = {}
-        # 下拉框选中即刷新按钮可点性（主线程回调，直接同步即可）
-        try:
-            self._t_navmap.trace_add(
-                'write', lambda *a: self._sync_map_buttons())
-        except Exception:
-            pass
+        # ---- 建图与导航页状态 ----
+        # 栈、订阅、地图图都放在 NavState 里：切语言会销毁并重建所有控件，
+        # 状态放控件上就会丢（正在跑的导航栈会变成没人管的孤儿进程）。
+        self.nav = NavState(os.path.join(BASE_DIR, 'nav')) if _HAS_NAV else None
+        # 速度中继：/cmd_vel 的唯一写入者（键盘与规划器共用出口）
+        self.relay = DriveRelay(os.path.join(BASE_DIR, 'nav', 'helpers'),
+                                self._log)
+        self.panel = None
+        self._move_keys = set()      # 底盘页当前按住的键
+        # X11 的按键自动重复会成对发 KeyPress/KeyRelease：真的每 33 ms 停一次，
+        # 车就是一冲一顿。松键后等 150 ms 再真正停车，中间来了新的 press 就取消。
+        self._move_rel = {}          # key -> after id
         self._build_ui()
+        # 键盘遥控：绑在 root 上一次即可。面板每次切语言都会重建，绑在面板上
+        # 会越绑越多（add='+' 只增不减），最后一次按键被处理 N 遍。
+        self.nb.bind('<<NotebookTabChanged>>', self._on_tab_change, add='+')
+        self.root.bind('<KeyPress>', self._forward_key, add='+')
+        self.root.bind('<KeyRelease>', self._forward_key_up, add='+')
         # 关键修复1：init_node 必须在主线程做，否则
         # "signal only works in main thread"
         try:
@@ -1444,6 +1473,7 @@ class App:
             self._start_worker(self._ros_connect)
         self._spawn_subscribers()
         self.root.after(500, self._tick)
+        self.root.after(200, self._panel_tick)
         self.root.after(200, self._camera_tick)
         # 关闭窗口时顺手 shutdown ROS，避免后台线程残留
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
@@ -1467,6 +1497,28 @@ class App:
         ts.configure('Green.TButton', background='#2f8a46', foreground='#ffffff')
         ts.configure('Red.TButton', background='#b33630', foreground='#ffffff')
 
+        # 禁用态必须一眼看得出来。clam 默认的禁用按钮仍是浅灰底、禁用输入框
+        # 仍是白底，在深色界面上跟可用控件几乎没区别——"灰掉"等于没灰。
+        # 这里只改 disabled 这一档：禁用 = 沉进背景的深色 + 暗字，可用态
+        # 的颜色一个不动。
+        for st, bg, fg in (('TButton', '#dcdad5', '#000000'),
+                           ('Green.TButton', '#2f8a46', '#ffffff'),
+                           ('Red.TButton', '#b33630', '#ffffff')):
+            ts.map(st,
+                   background=[('disabled', '#2a2f36'), ('!disabled', bg)],
+                   foreground=[('disabled', '#5b6570'), ('!disabled', fg)])
+        ts.map('TEntry',
+               fieldbackground=[('disabled', '#22262b'),
+                                ('!disabled', '#ffffff')],
+               foreground=[('disabled', '#5b6570'), ('!disabled', '#000000')])
+        ts.map('TCombobox',
+               fieldbackground=[('disabled', '#22262b'),
+                                ('readonly', '#ffffff'),
+                                ('!disabled', '#ffffff')],
+               foreground=[('disabled', '#5b6570')])
+        # 勾选框不在这里动：这个面板里的勾选框从来不会被禁用，改了反而把
+        # 指示器涂成背景色，看不出选没选。
+
         # 所有控件都挂在这个容器下：切语言时整棵销毁重建，
         # 避免逐个控件去改 text。
         self._ui_root = tk.Frame(R, bg='#1e2228')
@@ -1489,11 +1541,14 @@ class App:
         nb = ttk.Notebook(self._ui_root)
         nb.pack(fill='both', expand=True, padx=10, pady=(0, 8))
 
+        self.nb = nb
         t_move = ttk.Frame(nb)
+        self._f_move = t_move
         t_light = ttk.Frame(nb)
         t_arm = ttk.Frame(nb)
         t_cam = ttk.Frame(nb)
         t_map = ttk.Frame(nb)
+        self._f_map = t_map          # 键盘路由要按页签 id 比较，不能拿面板对象比
         t_status = ttk.Frame(nb)
         nb.add(t_move, text=L(' 底盘运动 '))
         nb.add(t_light, text=L(' 灯光与声效 '))
@@ -1524,7 +1579,6 @@ class App:
         self._build_ui()
         self._restore_ui(snap)
         self._sync_rgb_buttons()
-        self._sync_map_buttons()
         self._log(L('界面语言已切换为英文') if code == 'en'
                   else L('界面语言已切换为中文'))
 
@@ -1592,52 +1646,72 @@ class App:
 
     # ---- 页1: 底盘运动 ----
     def _build_move(self, f):
-        ttk.Label(f, text=L('底盘运动（单次指令，动作结束后自动制动）'),
-                  style='H.TLabel')\
-            .pack(anchor='w', padx=16, pady=(12, 4))
-        pad = ttk.Frame(f)
-        pad.pack(expand=True)
-        g = {'padx': 12, 'pady': 12}
-        bw = max(fit(L(t)) for t in ('前进 0.5 m', '后退 0.5 m', '左转 45°',
-                                     '右转 45°', '左转 90°', '右转 90°', '停止'))
-        ttk.Button(pad, text=L('前进 0.5 m'), style='Green.TButton', width=bw,
-                   command=lambda: self.cmd('forward', 0.5)).grid(row=0, column=1, **g)
-        ttk.Button(pad, text=L('左转 45°'), width=bw,
-                   command=lambda: self.cmd('turn', 'L', 45)).grid(row=1, column=0, **g)
-        ttk.Button(pad, text=L('停止'), style='Red.TButton', width=bw,
-                   command=lambda: self.cmd('stop')).grid(row=1, column=1, **g)
-        ttk.Button(pad, text=L('右转 45°'), width=bw,
-                   command=lambda: self.cmd('turn', 'R', 45)).grid(row=1, column=2, **g)
-        ttk.Button(pad, text=L('后退 0.5 m'), width=bw,
-                   command=lambda: self.cmd('backward', -0.5)).grid(row=2, column=1, **g)
-        ttk.Button(pad, text=L('左转 90°'), width=bw,
-                   command=lambda: self.cmd('turn', 'L', 90)).grid(row=0, column=0, **g)
-        ttk.Button(pad, text=L('右转 90°'), width=bw,
-                   command=lambda: self.cmd('turn', 'R', 90)).grid(row=0, column=2, **g)
+        # 整页只有三块内容，全部居中放：贴左上角会显得像没做完。
+        # 之前用 place(relx=.5) 居中，但内容宽度超过窗口时会被左右切掉，
+        # 所以改成 pack(expand=True) + 长文案 wraplength 自动折行。
+        body = ttk.Frame(f)
+        body.pack(expand=True, fill='both')
+        card = ttk.Frame(body)
+        card.pack(expand=True)
 
-        ttk.Label(f, text=L('连续速度控制'), style='H.TLabel')\
-            .pack(anchor='w', padx=16, pady=(6, 2))
-        joystick = ttk.Frame(f)
-        joystick.pack(padx=16, pady=4)
+        ttk.Label(card, text=L('底盘运动（键盘控制）'), style='H.TLabel')\
+            .pack(pady=(0, 10))
+
+        # 键位图例：两列等宽，整体居中
+        keys = ttk.Frame(card)
+        keys.pack(pady=(0, 4))
+        legend = [
+            ('W  /  S', '前进 / 后退'),
+            ('A  /  D', '左转 / 右转'),
+            (L('空格'), '立即停车'),
+        ]
+        for r, (k, what) in enumerate(legend):
+            ttk.Label(keys, text=k, font=('TkFixedFont', 14, 'bold'),
+                      width=9, anchor='e').grid(row=r, column=0, sticky='e', pady=4)
+            ttk.Label(keys, text=L(what), anchor='w').grid(
+                row=r, column=1, sticky='w', padx=(14, 0))
+
+        ttk.Label(card, text=L('连续速度控制（键盘用这两个值）'), style='H.TLabel')\
+            .pack(pady=(18, 6))
+
+        joystick = ttk.Frame(card)
+        joystick.pack()
         # 范围按驱动硬限幅设（linear_speed_limit=0.4 / angular=2.0），
         # 之前给到 ±1.0 但驱动会钳回 0.4，滑杆看着"失灵"。
-        self._sl_speed = tk.Scale(joystick, from_=-RobotROS.LIN_MAX, to=RobotROS.LIN_MAX,
-                                  resolution=0.05, orient='horizontal',
-                                  length=250, label=L('线速度 m/s'))
-        self._sl_turn = tk.Scale(joystick, from_=-RobotROS.ANG_MAX, to=RobotROS.ANG_MAX,
-                                 resolution=0.1, orient='horizontal',
-                                 length=250, label=L('角速度 rad/s'))
-        self._sl_speed.set(0); self._sl_turn.set(0)
-        self._sl_speed.pack(side='left', padx=10)
-        self._sl_turn.pack(side='left', padx=10)
-        ttk.Button(joystick, text=L('启动'), style='Green.TButton',
-                   command=self._manual_go).pack(side='left', padx=8)
-        ttk.Button(joystick, text=L('紧急停止'), style='Red.TButton',
-                   command=lambda: self.cmd('stop')).pack(side='left')
-        ttk.Label(f, text=L('速度范围取自底盘驱动限幅参数（线速度 0.4 m/s、角速度 2.0 rad/s）。'
-                            '指令以 20 Hz 周期持续发布，5 秒无操作自动制动，'
-                            '关闭窗口时同样会先发送制动指令。')).pack(anchor='w', padx=16,
-                                                                 pady=(2, 0))
+        # 标题用独立 Label：tk.Scale 自带的 label 会按 length 截断（"Angular
+        # speed (ra…"），而且会把槽体挤到框外。
+        cols = [
+            ('线速度 m/s', '_sl_speed', -RobotROS.LIN_MAX, RobotROS.LIN_MAX, 0.05, 0.20),
+            ('角速度 rad/s', '_sl_turn', -RobotROS.ANG_MAX, RobotROS.ANG_MAX, 0.1, 0.60),
+        ]
+        for title, attr, lo, hi, res, init in cols:
+            col = ttk.Frame(joystick)
+            col.pack(side='left', padx=12)
+            ttk.Label(col, text=L(title)).pack(pady=(0, 2))
+            sl = tk.Scale(col, from_=lo, to=hi, resolution=res, orient='horizontal',
+                          length=240, width=14, sliderlength=20, showvalue=True)
+            # 默认给一个"按下去就能走"的值：0 会让方向键看起来没反应。
+            sl.set(init)
+            sl.pack()
+            setattr(self, attr, sl)
+
+        ttk.Button(card, text=L('紧急停止'), style='Red.TButton',
+                   command=self.cmd_stop).pack(pady=(18, 0))
+
+        self._move_hint = ttk.Label(
+            card, justify='center', wraplength=640,
+            text=L('按住方向键持续运动，松开即停；只有本页可见时键盘才生效。'
+                   '导航运行中按方向键会先取消目标再接管。'
+                   '速度范围取自底盘驱动限幅（0.4 m/s、2.0 rad/s）。'))
+        self._move_hint.pack(pady=(22, 0))
+        # 窗口变窄时按宽度重新折行，避免文案被切掉
+        card.bind('<Configure>', self._wrap_move_hint)
+
+    def _wrap_move_hint(self, ev):
+        try:
+            self._move_hint.configure(wraplength=max(320, ev.width - 40))
+        except Exception:
+            pass
 
     # ---- 页2: 灯光与声效 ----
     def _build_light(self, f):
@@ -1875,9 +1949,23 @@ class App:
                 else L('（无深度流）')))
             self._t_camstat.set(L('采集中…'))
             self._log(L('✓ 图像采集已启动 %s') % self._t_camsrc.get())
+            # 话题订阅成功 /= 有画面：驱动没起时订阅照样成立，画面永远空着。
+            self.root.after(3500, self._cam_nudge)
         else:
             self._log(L('✗ 图像采集启动失败：%s')
                       % (self._cam._last_err or L('未知原因')))
+
+    def _cam_nudge(self):
+        """采集开了却没帧：多半是 Astra 驱动没起，指一下旁边那个按钮。"""
+        try:
+            if not self._cam.viewing:
+                return
+            rgb, _t, _d, _dt = self._cam.latest()
+            if rgb is not None:
+                return
+            self._log(L('○ 还没有图像帧：Astra 驱动可能没启动，点「启动Astra驱动」'))
+        except Exception:
+            pass
 
     def _cam_close(self):
         self._cam.stop()
@@ -2000,426 +2088,194 @@ class App:
     # 正本模型：地图文件只认机器人 ~/transbot_ws/src/transbot_nav/maps/，
     # 本机只看（scp 下 pgm 进 /tmp 弹窗）或冷备份。删除/重命名去机器人端做。
     def _build_mapnav(self, f):
-        self._map_btns = {}
-        B = self._map_btns
+        """建图与导航：三种模式共用一块地图画布。
 
-        def _btn(parent, key, text, cmd, style=None, width=None):
-            b = ttk.Button(parent, text=text, width=width or fit(text), command=cmd)
-            if style:
-                b.configure(style=style)
-            b.pack(side='left', padx=4)
-            B[key] = b
-            return b
-
-        # 1. 雷达（只检查：雷达随自启栈常驻，挂了要去机器人端整栈重启）
-        ttk.Label(f, text=L('雷达状态（自启栈常驻，此处只检查）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(12, 4))
-        r1 = ttk.Frame(f)
-        r1.pack(anchor='w', padx=16)
-        _btn(r1, 'scan', L('检查雷达'), self._mn_scan)
-        ttk.Label(r1, textvariable=self._t_scan).pack(side='left', padx=12)
-
-        # 2. 在线建图
-        ttk.Label(f, text=L('在线建图（gmapping，跑在机器人端）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
-        r2 = ttk.Frame(f)
-        r2.pack(anchor='w', padx=16)
-        _btn(r2, 'map_start', L('开始建图'), self._mn_map_start,
-             style='Green.TButton')
-        _btn(r2, 'map_stop', L('停止建图'), self._mn_map_stop,
-             style='Red.TButton')
-        ttk.Label(r2, textvariable=self._t_mapstat).pack(side='left', padx=12)
-
-        # 3. 实时查看（rviz 子进程，与建图/相机驱动状态无关，可随时开）
-        ttk.Label(f, text=L('实时查看'), style='H.TLabel')\
-            .pack(anchor='w', padx=16, pady=(10, 4))
-        r3 = ttk.Frame(f)
-        r3.pack(anchor='w', padx=16)
-        _btn(r3, 'rviz_map', L('RViz 看建图'), lambda: self._mn_rviz('map'))
-        _btn(r3, 'rviz_cam', L('RViz 看相机'), lambda: self._mn_rviz('cam'))
-        _btn(r3, 'rviz_close', L('关闭 RViz'), self._mn_rviz_close)
-
-        # 4. 保存地图（仅建图中可点）
-        ttk.Label(f, text=L('保存地图（仅建图中可点，正本存机器人）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
-        r4 = ttk.Frame(f)
-        r4.pack(anchor='w', padx=16)
-        ttk.Label(r4, text=L('地图名')).pack(side='left')
-        ttk.Entry(r4, textvariable=self._t_savename, width=22)\
-            .pack(side='left', padx=(4, 8))
-        _btn(r4, 'save', L('保存地图'), self._mn_save,
-             style='Green.TButton')
-        ttk.Checkbutton(r4, text=L('允许覆盖同名地图'),
-                        variable=self._t_overwrite).pack(side='left', padx=8)
-        ttk.Checkbutton(r4, text=L('同时下载到本机备份'),
-                        variable=self._t_backup).pack(side='left', padx=8)
-        ttk.Label(f, text=L('机器人目录：') + '~/transbot_ws/src/transbot_nav/maps/',
-                  foreground='#9aa5b1').pack(anchor='w', padx=16, pady=(2, 0))
-
-        # 5/6. 查看存图 + 自主导航（共用下拉框）
-        ttk.Label(f, text=L('查看存图（本地显示，不经过 ROS）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
-        ttk.Label(f, text=L('自主导航（跑在机器人端，需先停止建图）'),
-                  style='H.TLabel').pack(anchor='w', padx=16, pady=(10, 4))
-        r6 = ttk.Frame(f)
-        r6.pack(anchor='w', padx=16)
-        ttk.Label(r6, text=L('地图')).pack(side='left')
-        self._map_combo = ttk.Combobox(r6, textvariable=self._t_navmap,
-                                       values=self._map_names, width=24,
-                                       state='readonly')
-        self._map_combo.pack(side='left', padx=(4, 8))
-        _btn(r6, 'refresh', L('刷新列表'), self._mn_refresh)
-        _btn(r6, 'view', L('打开已有地图'), self._mn_view)
-        _btn(r6, 'nav_start', L('开始导航'), self._mn_nav_start,
-             style='Green.TButton')
-        _btn(r6, 'nav_stop', L('停止导航'), self._mn_nav_stop,
-             style='Red.TButton')
-        ttk.Label(r6, textvariable=self._t_navstat).pack(side='left', padx=12)
-
-        # 7. 安全（复用底盘制动）
-        ttk.Button(f, text=L('紧急停止'), style='Red.TButton',
-                   command=lambda: self.cmd('stop'))\
-            .pack(anchor='w', padx=16, pady=(12, 6))
-        self._sync_map_buttons()
-
-    def _mn_state_get(self):
-        with self._mn_lock:
-            return self._mn_state
-
-    def _mn_state_set(self, s):
-        with self._mn_lock:
-            self._mn_state = s
-        self._ui(self._sync_map_buttons)
-
-    def _sync_map_buttons(self):
-        """按 建图/导航 状态机开关按钮。主线程调用（重建/状态变更后）。"""
-        B = getattr(self, '_map_btns', {})
-        if not B:
-            return
+        面板在 nav/panel.py，这里只负责挂上去。控件每次切语言都会重建，
+        但运行中的栈、订阅和地图图在 App.nav（NavState）里，所以切语言
+        不会把正在跑的导航弄丢。
+        """
         try:
-            st = self._mn_state_get()
-            connected = self.robot.connected()
-            B['map_start'].configure(
-                state='normal' if (connected and st == 'idle') else 'disabled')
-            B['map_stop'].configure(
-                state='normal' if st == 'mapping' else 'disabled')
-            B['nav_start'].configure(
-                state='normal' if (connected and st == 'idle'
-                                   and self._t_navmap.get().strip()) else 'disabled')
-            B['nav_stop'].configure(
-                state='normal' if st == 'navigating' else 'disabled')
-            B['save'].configure(
-                state='normal' if (connected and st == 'mapping') else 'disabled')
-            B['view'].configure(
-                state='normal' if self._t_navmap.get().strip() else 'disabled')
-            try:
-                self._map_combo.configure(values=self._map_names)
-            except Exception:
-                pass
+            self.panel = MapPanel(f, self, L)
+            self.panel.pack(fill='both', expand=True)
+        except Exception as e:
+            self.panel = None
+            self._log(L('✗ 建图导航面板初始化失败：%s')
+                      % (NAV_IMPORT_ERROR or e))
+
+    # ---- 建图/导航面板的胶水（面板自己管 8 Hz 重绘，这里只管转发） ----
+    def nav_camera_frame(self, box_w, box_h):
+        """建图页右侧的小预览：复用视觉页的采集，只做缩放，不另开订阅。"""
+        if not (_CAM_OK and self._cam.viewing):
+            return None
+        rgb_msg, rgb_t, _depth, _dt = self._cam.latest()
+        if rgb_msg is None:
+            return None
+        if rgb_t == self._nav_cam_t:
+            return self._nav_cam_photo
+        self._nav_cam_t = rgb_t
+        img = decode_rgb_raw(rgb_msg)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        scale = min(box_w / float(w), box_h / float(h))
+        if scale < 1.0:
+            img = cv.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))),
+                            interpolation=cv.INTER_AREA)
+        self._nav_cam_photo = PilImageTk.PhotoImage(
+            PilImage.fromarray(cv.cvtColor(img, cv.COLOR_BGR2RGB)))
+        return self._nav_cam_photo
+
+    def _sync_nav(self):
+        """按连接状态刷新建图页按钮。主线程调用。"""
+        try:
+            if self.panel is not None:
+                self.panel._sync()
         except Exception:
             pass
 
-    def _mn_guard_connected(self):
-        if not self.robot.connected():
-            self._log(L('⚠ 尚未连接至机器人，本次操作已忽略'))
-            return False
-        return True
+    def _panel_tick(self):
+        try:
+            if self.panel is not None:
+                self.panel.tick()
+        except Exception:
+            pass
+        finally:
+            self.root.after(80, self._panel_tick)
 
-    # -- 1. 雷达检查 --
-    def _mn_scan(self):
-        if not self._mn_guard_connected():
-            return
-
-        def work():
-            try:
-                self._log(L('→ 正在检查雷达…'))
-                ok = self.robot.scan_ok(timeout=4)
-                self._ui(lambda: self._t_scan.set(
-                    L('● /scan 有数据') if ok else L('○ /scan 无数据')))
-                self._log(L('✓ 雷达正常：/scan 有数据') if ok else L(
-                    '✗ 雷达无数据，请检查机器人端自启栈（/scan）'))
-            except Exception as e:
-                self._log(L('✗ 执行失败：%s') % e)
-        self._start_worker(work)
-
-    # -- 2. 建图启停 --
-    def _mn_map_start(self):
-        if not self._mn_guard_connected():
-            return
-        if self._mn_state_get() == 'navigating':
-            self._log(L('○ 导航进行中，请先停止导航再建图'))
-            return
-
-        def work():
-            try:
-                if self.robot.map_ok(timeout=3):
-                    self._mn_state_set('mapping')
-                    self._ui(lambda: self._t_mapstat.set(L('● /map 有数据')))
-                    self._log(L('○ 建图已在运行'))
-                    return
-                self._log(L('→ 正在机器人上启动建图…'))
-                self.robot.map_start()
-                self._mn_state_set('mapping')
-                self._ui(lambda: self._t_mapstat.set(L('● /map 有数据')))
-                self._log(L('✓ 建图已启动，话题 %s') % self.robot.MAP_TOPIC)
-            except Exception as e:
-                msg = str(e)
-                if 'in progress' in msg:
-                    self._log(L('○ 建图/导航操作进行中，请稍候'))
-                else:
-                    self._log(L('✗ 建图启动失败：%s') % e)
-        self._start_worker(work)
-
-    def _mn_map_stop(self):
-        if not self._mn_guard_connected():
-            return
-
-        def work():
-            try:
-                self._log(L('→ 正在停止建图…'))
-                self.robot.map_stop()
-                self._mn_state_set('idle')
-                self._ui(lambda: self._t_mapstat.set(L('○ /map 无数据')))
-                self._log(L('✓ 建图已停止'))
-            except Exception as e:
-                msg = str(e)
-                if 'in progress' in msg:
-                    self._log(L('○ 建图/导航操作进行中，请稍候'))
-                else:
-                    self._log(L('✗ 建图停止失败：%s') % e)
-        self._start_worker(work)
-
-    # -- 3. RViz（本机子进程） --
-    @staticmethod
-    def _rviz_cfg(name):
-        base = os.path.dirname(os.path.abspath(__file__))
-        cands = [os.path.join(base, 'rviz', name),
-                 os.path.join(base, name)]
-        for p in cands:
-            if os.path.exists(p):
-                return p
+    def _tab_kind(self):
+        """当前可见的是哪一页：'move'（底盘）、'nav'（建图导航）或 None。"""
+        try:
+            cur = self.nb.select()
+            if cur == str(self._f_move):
+                return 'move'
+            if self.panel is not None and cur == str(getattr(self, '_f_map', None)):
+                return 'nav'
+        except Exception:
+            pass
         return None
 
-    @staticmethod
-    def _patched_cam_cfg(src):
-        """返回相机 rviz 配置的补丁副本路径（/tmp），失败返回 None。"""
-        try:
-            with open(src, 'r') as fh:
-                lines = fh.readlines()
-            out = []
-            for ln in lines:
-                if ln.strip() == 'Image Topic: /image':
-                    indent = ln[:len(ln) - len(ln.lstrip())]
-                    out.append('%sImage Topic: /camera/rgb/image_raw\n' % indent)
-                else:
-                    out.append(ln)
-            dst = '/tmp/transbot_gui_camera.rviz'
-            with open(dst, 'w') as fh:
-                fh.writelines(out)
-            return dst
-        except Exception:
-            return None
-
-    def _mn_rviz(self, kind):
-        cfg = self._rviz_cfg('transbot_mapping.rviz' if kind == 'map'
-                             else 'transbot_camera.rviz')
-        if cfg is None:
-            self._log(L('✗ 找不到 RViz 配置：%s') % kind)
-            return
-        if kind == 'cam':
-            # 相机 rviz 配置里的 Image 显示绑的是 /image（出厂 msgToimg 链，
-            # 自启程序杀掉后即无数据）。打开前打个补丁副本指向驱动直出的
-            # /camera/rgb/image_raw，只整行精确替换，不碰原文件。
-            cfg = self._patched_cam_cfg(cfg)
-            if cfg is None:
-                self._log(L('✗ 找不到 RViz 配置：%s') % kind)
-                return
-        old = self._rviz.get(kind)
-        try:
-            if old is not None and old.poll() is None:
-                self._log(L('○ RViz 已在运行'))
-                return
-        except Exception:
-            pass
-        self._log(L('→ 正在本机打开 RViz（%s）…') % cfg)
-        try:
-            self._rviz[kind] = subprocess.Popen(['rviz', '-d', cfg])
-            self._log(L('✓ RViz 已打开'))
-        except Exception as e:
-            self._log(L('✗ RViz 启动失败：%s') % e)
-
-    def _mn_rviz_close(self):
-        for kind, p in list(self._rviz.items()):
+    def _forward_key(self, ev):
+        kind = self._tab_kind()
+        if kind == 'move':
+            return self._move_key(ev)
+        if kind == 'nav' and self.panel is not None:
             try:
-                if p is not None and p.poll() is None:
-                    p.terminate()
+                return self.panel.on_key(ev)
+            except Exception:
+                return None
+        return None
+
+    def _forward_key_up(self, ev):
+        kind = self._tab_kind()
+        if kind == 'move':
+            return self._move_key_up(ev)
+        if kind == 'nav' and self.panel is not None:
+            try:
+                return self.panel.on_key_up(ev)
+            except Exception:
+                return None
+        return None
+
+    # ---- 底盘页：按住即走 ----
+    KEY_RELEASE_DELAY = 150          # ms
+
+    def _typing_somewhere(self):
+        """焦点在输入框里时不要抢键（否则在日志框/地图名里打字会开车）。"""
+        try:
+            focus = self.root.focus_get()
+        except Exception:
+            focus = None
+        return isinstance(focus, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox))
+
+    def _move_key(self, ev):
+        if not self.robot.connected():
+            return None
+        if self._typing_somewhere():
+            return None
+        key = ev.keysym.lower()
+        if key == 'space':
+            self.cmd_stop()
+            return 'break'
+        if key not in MOVE_KEYMAP:
+            return None
+        # 自动重复的 press 到达 -> 取消刚排上的停车
+        t = self._move_rel.pop(key, None)
+        if t is not None:
+            try:
+                self.root.after_cancel(t)
             except Exception:
                 pass
-        self._rviz = {}
-        self._log(L('○ RViz 已关闭'))
+        if key not in self._move_keys:
+            self._move_keys.add(key)
+            self._apply_move()
+        return 'break'
 
-    def _mn_rviz_reap(self):
-        """_tick 里顺手回收已退出的 rviz（主线程）。"""
+    def _move_key_up(self, ev):
+        key = ev.keysym.lower()
+        if key not in self._move_keys:
+            return None
+        t = self._move_rel.pop(key, None)
+        if t is not None:
+            try:
+                self.root.after_cancel(t)
+            except Exception:
+                pass
+        self._move_rel[key] = self.root.after(
+            self.KEY_RELEASE_DELAY, lambda k=key: self._release_move_key(k))
+        return 'break'
+
+    def _release_move_key(self, key):
+        self._move_rel.pop(key, None)
+        if key in self._move_keys:
+            self._move_keys.discard(key)
+            self._apply_move()
+
+    def _apply_move(self):
+        """按住哪些键 -> 发什么速度。速度幅度取两个滑杆。"""
+        lin = abs(self._sl_speed.get())
+        ang = abs(self._sl_turn.get())
+        lx = az = 0.0
+        for k in self._move_keys:
+            f, t = MOVE_KEYMAP[k]
+            lx += f * lin
+            az += t * ang
+        lx = max(-RobotROS.LIN_MAX, min(RobotROS.LIN_MAX, lx))
+        az = max(-RobotROS.ANG_MAX, min(RobotROS.ANG_MAX, az))
         try:
-            dead = [k for k, p in self._rviz.items()
-                    if p is not None and p.poll() is not None]
-            for k in dead:
-                self._rviz.pop(k, None)
-        except Exception:
-            pass
-
-    # -- 4. 保存地图 --
-    def _mn_save(self):
-        if not self._mn_guard_connected():
-            return
-        if self._mn_state_get() != 'mapping':
-            self._log(L('○ 请先开始建图再保存'))
-            return
-        name = self._t_savename.get().strip()
-        if not name:
-            self._log(L('○ 请先输入地图名'))
-            return
-        overwrite = bool(self._t_overwrite.get())
-        backup = bool(self._t_backup.get())
-        # 备份目录在主线程先问好（文件对话框不能放后台线程）
-        backup_dir = None
-        if backup:
-            backup_dir = filedialog.askdirectory(title=L('选择本机备份目录'))
-            if not backup_dir:
-                return
-
-        def work():
-            try:
-                if self.robot.map_exists(name) and not overwrite:
-                    self._log(L('✗ 同名地图已存在，勾选“允许覆盖”或换个名字：%s') % name)
-                    return
-                self._log(L('→ 正在保存地图 %s …') % name)
-                self.robot.map_save(name)
-                self._log(L('✓ 地图已保存：%s（机器人端）') % name)
-                self._ui(lambda n=name: self._t_navmap.set(n))
-                if backup_dir:
-                    try:
-                        self.robot.map_backup(name, backup_dir)
-                        self._log(L('✓ 已备份到本机：%s') % backup_dir)
-                    except Exception as e:
-                        self._log(L('✗ 本机备份失败：%s') % e)
-                self._mn_refresh(silent=True)
-            except Exception as e:
-                msg = str(e)
-                if 'in progress' in msg:
-                    self._log(L('○ 建图/导航操作进行中，请稍候'))
-                else:
-                    self._log(L('✗ 地图保存失败：%s') % e)
-        self._start_worker(work)
-
-    # -- 5/6. 列表 / 查看 / 导航 --
-    def _mn_refresh(self, silent=False):
-        if not self._mn_guard_connected():
-            return
-
-        def work():
-            try:
-                if not silent:
-                    self._log(L('→ 正在刷新地图列表…'))
-                names = self.robot.map_list()
-                self._map_names = names
-                cur = self._t_navmap.get().strip()
-                if cur and cur not in names:
-                    pass  # 保留手填/刚存的值，导航前会校验存在性
-                if not cur and names:
-                    self._ui(lambda ns=names: self._t_navmap.set(ns[0]))
-                self._ui(self._sync_map_buttons)
-                if not silent:
-                    self._log(L('○ 地图列表：%s')
-                              % (', '.join(names) if names else L('（空）')))
-            except Exception as e:
-                self._log(L('✗ 执行失败：%s') % e)
-        # silent 调用可能来自后台线程内部：直接跑逻辑，另起线程会乱序
-        if silent and threading.current_thread() is not threading.main_thread():
-            work()
-        else:
-            self._start_worker(work)
-
-    def _mn_view(self):
-        if not self._mn_guard_connected():
-            return
-        name = self._t_navmap.get().strip()
-        if not name:
-            self._log(L('○ 请先选择地图'))
-            return
-
-        def work():
-            try:
-                self._log(L('→ 正在打开地图 %s …') % name)
-                local = '/tmp/gui_map_%s.pgm' % re.sub(r'\W+', '_', name)
-                self.robot.map_fetch(name, local)
-                self._ui(lambda p=local, n=name: self._show_pgm(p, n))
-            except Exception as e:
-                self._log(L('✗ 地图打开失败：%s') % e)
-        self._start_worker(work)
-
-    def _show_pgm(self, path, name):
-        """主线程：本地 pgm 弹窗显示（只看不发布，与 ROS 无关）。"""
-        try:
-            img = PilImage.open(path)
-            w, h = img.size
-            scale = min(1.0, 860.0 / max(1, w), 640.0 / max(1, h))
-            if scale < 1.0:
-                img = img.resize((int(w * scale), int(h * scale)))
-            win = tk.Toplevel(self.root)
-            win.title('%s - %s' % (L('打开已有地图'), name))
-            win.configure(bg='#1e2228')
-            tk_img = PilImageTk.PhotoImage(img)
-            lb = tk.Label(win, image=tk_img, bg='#1e2228')
-            lb.pack(padx=10, pady=10)
-            lb.image = tk_img  # 保持引用防回收
+            if abs(lx) < 1e-3 and abs(az) < 1e-3:
+                self.robot.stop_manual()
+            else:
+                # 导航正在跑就先把目标取消：键盘接管，别让 move_base 和手抢
+                if self.nav is not None and self.nav.goal is not None:
+                    self.nav.cancel_goal()
+                    self._log(L('○ 手动遥控接管，导航目标已取消'))
+                self.robot.manual(lx, az, hold=0)
         except Exception as e:
-            self._log(L('✗ 地图打开失败：%s') % e)
+            self._log(L('✗ 遥控指令失败：%s') % e)
 
-    def _mn_nav_start(self):
-        if not self._mn_guard_connected():
-            return
-        if self._mn_state_get() == 'mapping':
-            self._log(L('○ 建图进行中，请先停止建图再导航'))
-            return
-        name = self._t_navmap.get().strip()
-        if not name:
-            self._log(L('○ 请先选择地图'))
-            return
+    def cmd_stop(self):
+        """停车：清空按键 + 发一条 0 速度。"""
+        self._move_keys.clear()
+        try:
+            self.cmd('stop')
+        except Exception as e:
+            self._log(L('✗ 制动失败：%s') % e)
 
-        def work():
+    def _on_tab_change(self, _ev=None):
+        """切页时清掉按住的键：否则按住 W 切页，车会一直走。"""
+        for t in list(self._move_rel.values()):
             try:
-                self._log(L('→ 正在机器人上启动导航（地图 %s）…') % name)
-                self.robot.nav_start(name)
-                self._mn_state_set('navigating')
-                self._ui(lambda: self._t_navstat.set(L('● move_base 在跑')))
-                self._log(L('✓ 导航已启动（地图 %s）') % name)
-            except Exception as e:
-                msg = str(e)
-                if 'in progress' in msg:
-                    self._log(L('○ 建图/导航操作进行中，请稍候'))
-                else:
-                    self._log(L('✗ 导航启动失败：%s') % e)
-        self._start_worker(work)
-
-    def _mn_nav_stop(self):
-        if not self._mn_guard_connected():
-            return
-
-        def work():
+                self.root.after_cancel(t)
+            except Exception:
+                pass
+        self._move_rel.clear()
+        if self._move_keys:
+            self._move_keys.clear()
             try:
-                self._log(L('→ 正在停止导航…'))
-                self.robot.nav_stop()
-                self._mn_state_set('idle')
-                self._ui(lambda: self._t_navstat.set(L('○ move_base 未运行')))
-                self._log(L('✓ 导航已停止'))
-            except Exception as e:
-                msg = str(e)
-                if 'in progress' in msg:
-                    self._log(L('○ 建图/导航操作进行中，请稍候'))
-                else:
-                    self._log(L('✗ 导航停止失败：%s') % e)
-        self._start_worker(work)
+                self.robot.stop_manual()
+            except Exception:
+                pass
+
 
     # ---- 页6: 系统状态（可复制） ----
     def _build_status(self, f):
@@ -2635,6 +2491,8 @@ class App:
             return
         self._log(L('→ 连续控制已启动：线速度 %.2f m/s，角速度 %.2f rad/s'
                     '（5 秒后自动制动）') % (lx, az))
+        # 导航在跑时，中继会按优先级仲裁：遥控消息一到，规划器那路自动静音
+        # 0.3 s，所以这里不需要停任何进程。
         self._run(lambda: self.robot.manual(lx, az, hold=5.0))
 
     def _start_worker(self, fn):
@@ -2644,11 +2502,13 @@ class App:
         # 后台线程：只做阻塞等待，绝不碰 Tk（通过 _set_status/_log 转发到主线程）
         try:
             self.robot.wait_for_services(timeout=8)
+            # 服务通了才起中继：它要连 master，早于连接起来会反复重连刷日志
+            self.robot.relay_up = self.relay.start()
             self._set_status(
                 L('● 已连接 ') + STATE['master'].replace('http://', ''), '#7fd88f')
             self._log(L('✓ 已建立连接：ROS Master %s') % STATE['master'])
-            # 建图页按钮按连接状态开关：连上后刷新一次，否则开始建图一直是灰的
-            self._ui(self._sync_map_buttons)
+            # 建图页按钮按连接状态开关：连上后刷新一次，否则“启动”一直是灰的
+            self._ui(self._sync_nav)
             # 查相机型号，决定 RGB/深度订阅哪个话题（Astra 有深度，USBCam 没有）
             try:
                 dev = self.robot.get_cam_device()
@@ -2801,11 +2661,17 @@ class App:
         except Exception:
             pass
         try:
-            for p in getattr(self, '_rviz', {}).values():
-                if p is not None and p.poll() is None:
-                    p.terminate()
+            self.relay.stop()
         except Exception:
             pass
+        # 建图/导航栈是本地子进程，关窗口必须收干净：否则 gmapping 和
+        # move_base 会一直留在后台，下次启动时抢 /map 和 map->odom。
+        try:
+            if self.panel is not None:
+                self.panel.shutdown()
+                self._log(L('✓ 建图/导航栈已停止'))
+        except Exception as e:
+            self._log(L('✗ 停止建图/导航栈失败：%s') % e)
         try:
             rospy.signal_shutdown('gui closed')
         except Exception:
@@ -2868,15 +2734,6 @@ class App:
         except Exception:
             pass
         try:
-            self._mn_rviz_reap()
-        except Exception:
-            pass
-        try:
-            # 建图页按钮随连接/状态机刷新（1s 一次，configure 同值无闪烁）
-            self._sync_map_buttons()
-        except Exception:
-            pass
-        try:
             with self._cache_lock:
                 odom = self._cache.get('odom', '—')
                 volt = self._cache.get('volt', '—')
@@ -2891,7 +2748,42 @@ class App:
         except Exception:
             pass
         finally:
+            self._relay_watchdog()
             self.root.after(1000, self._tick)
+
+    def _relay_watchdog(self):
+        """Keep exactly one relay alive; restart it if it died."""
+        try:
+            if not self.robot.connected():
+                return
+            if self.relay.alive():
+                self.robot.relay_up = True
+                return
+            # 中继死了就立刻改走直连：relay_up 还是 True 的话，遥控会发到
+            # /cmd_vel_teleop，而那个话题已经没人听，车就不动了。
+            self.robot.relay_up = False
+            if time.time() - self.relay.last_start < 5.0:
+                return
+            if getattr(self, '_relay_restarting', False):
+                return
+            self._relay_restarting = True
+
+            def work():
+                try:
+                    self.robot.relay_up = self.relay.start(quiet=True)
+                    if self.robot.relay_up:
+                        self._log(L('○ 速度中继已重新拉起'))
+                    else:
+                        self._log(L('✗ 速度中继反复失败，遥控直连 /cmd_vel'))
+                        tail = self.relay.last_error()
+                        if tail:
+                            self._log('   ' + tail)
+                finally:
+                    self._relay_restarting = False
+
+            threading.Thread(target=work, daemon=True).start()
+        except Exception:
+            pass
 
 
 def main():

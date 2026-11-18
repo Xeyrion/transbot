@@ -2,8 +2,8 @@
 
 ## 0. Network model
 
-- The robot runs the ROS master (`:11311`) plus base/lidar/camera stacks (autostarted on power-on, ~18–20 nodes, wait ~1 min after power-on).
-- The control PC only publishes topics / calls services over WiFi. Nothing in this repo needs to run on the robot.
+- The robot runs the ROS master (`:11311`) and hardware drivers. Confirm live topics before use; camera/lidar startup depends on the installed robot configuration.
+- The control PC runs this GUI and its mapping/navigation processes, consuming topics and calling services over WiFi. Runtime ownership is described in the [architecture guide](../../docs/ARCHITECTURE.md).
 - The robot has two WiFi modes: AP (self-hosted hotspot, fixed default IP) and STA (joins an external router, IP assigned by DHCP). `env.sh` handles both.
 
 ## 1. Connect (every new terminal)
@@ -45,15 +45,16 @@ bash tasks/02-view-camera.sh       # rviz: RGB + depth cloud + laser + TF
 
 The GUI image panel is off by default to save WiFi bandwidth and falls back across color topics if one goes stale.
 
-## 5. Mapping / navigation (run on the robot, view from here)
+## 5. Mapping / navigation (control-PC stack)
 
-Mapping and navigation must run **on the robot mainboard** (stable `/scan`+`/odom` access, the serial lidar device, no WiFi packet loss). SSH to the mainboard as `jetson` (a different account from the control PC) and launch the vendor `transbot_nav` mapping/navigation there; use this repo only for visualization:
+Open the GUI's Mapping & Navigation tab. `console/nav/` starts gmapping, AMCL and move_base on the control PC; the robot supplies `/scan`, `/odom` and `/tf`. The three modes are described in the [navigation guide](../nav/README.md).
 
 ```bash
-ssh jetson@<robot-ip>            # mainboard, not the control PC
-bash tasks/10-mapping-ssh.sh     # prints the full command set, executes nothing
-bash tasks/03-view-mapping.sh    # back here: rviz with Fixed Frame=map
+bash run_gui.sh                 # Mapping & Navigation tab
+bash tasks/03-view-mapping.sh    # optional RViz visualization
 ```
+
+`tasks/10-mapping-ssh.sh` only prints an alternative vendor-stack procedure for the robot. It is not the GUI's default runtime. Do not start a second stack against the same ROS master while the GUI owns navigation.
 
 ## 6. Troubleshooting
 

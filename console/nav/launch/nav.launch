@@ -1,0 +1,95 @@
+<launch>
+  <!-- Pure navigation: map_server + AMCL + move_base, all on this machine.
+
+       Nothing here runs on the robot. The robot only publishes /scan, /odom
+       and /tf; the planners run locally so the whole stack can be stopped by
+       killing one process tree.
+
+       map_file is required (the GUI passes maps/<name>.yaml).
+       param_dir defaults to ../param next to this file; the GUI passes an
+       absolute path so the stack does not depend on the install location. -->
+  <arg name="map_file"/>
+  <arg name="param_dir" default="$(dirname)/../param"/>
+  <arg name="initial_pose_x" default="0.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
+  <arg name="initial_pose_a" default="0.0"/>
+  <!-- AMCL's stock initial covariance is 0.25 m^2, i.e. sigma 0.5 m, which
+       says nothing about the map. Tight here: the GUI sets the pose by hand
+       (two clicks) or accepts 0,0,0 deliberately. -->
+  <arg name="initial_cov_xx" default="0.0025"/>
+  <arg name="initial_cov_yy" default="0.0025"/>
+  <arg name="initial_cov_aa" default="0.0025"/>
+
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(arg map_file)"/>
+
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <param name="use_map_topic"             value="true"/>
+    <param name="gui_publish_rate"          value="10.0"/>
+
+    <param name="min_particles"             value="1000"/>
+    <param name="max_particles"             value="5000"/>
+    <param name="kld_err"                   value="0.01"/>
+    <param name="kld_z"                     value="0.99"/>
+    <param name="resample_interval"         value="1"/>
+
+    <param name="laser_model_type"          value="likelihood_field"/>
+    <param name="laser_max_beams"           value="60"/>
+    <param name="laser_max_range"           value="8.0"/>
+    <param name="laser_min_range"           value="0.15"/>
+    <param name="laser_z_hit"               value="0.85"/>
+    <param name="laser_z_short"             value="0.05"/>
+    <param name="laser_z_max"               value="0.05"/>
+    <param name="laser_z_rand"              value="0.05"/>
+    <param name="laser_sigma_hit"           value="0.1"/>
+    <param name="laser_lambda_short"        value="0.1"/>
+    <param name="laser_likelihood_max_dist" value="2.0"/>
+
+    <param name="update_min_d"              value="0.10"/>
+    <param name="update_min_a"              value="0.10"/>
+
+    <!-- diff-corrected: rotation noise is sqrt(alpha1*rot^2 + alpha2*trans^2).
+         The vendor value alpha2=0.10 injects 1.8 deg of heading noise per
+         0.10 m step, which random-walks to ~8 deg over a 2 m leg. The chassis
+         fuses an IMU and was validated against scan matching, so alpha2 is
+         cut to 0.005 (about 0.35 deg per step). alpha1 stays generous: the
+         chassis really does overshoot turns by 1.4x. -->
+    <param name="odom_model_type"           value="diff-corrected"/>
+    <param name="odom_alpha1"               value="0.10"/>
+    <param name="odom_alpha2"               value="0.005"/>
+    <param name="odom_alpha3"               value="0.01"/>
+    <param name="odom_alpha4"               value="0.01"/>
+
+    <param name="odom_frame_id"             value="odom"/>
+    <param name="base_frame_id"             value="base_footprint"/>
+    <param name="global_frame_id"           value="map"/>
+    <param name="transform_tolerance"       value="0.5"/>
+
+    <!-- The vendor sets both to 0.0, which disables the random-particle
+         injection AMCL needs to recover from a wrong initial guess. -->
+    <param name="recovery_alpha_slow"       value="0.001"/>
+    <param name="recovery_alpha_fast"       value="0.01"/>
+
+    <param name="initial_pose_x"            value="$(arg initial_pose_x)"/>
+    <param name="initial_pose_y"            value="$(arg initial_pose_y)"/>
+    <param name="initial_pose_a"            value="$(arg initial_pose_a)"/>
+    <param name="initial_cov_xx"            value="$(arg initial_cov_xx)"/>
+    <param name="initial_cov_yy"            value="$(arg initial_cov_yy)"/>
+    <param name="initial_cov_aa"            value="$(arg initial_cov_aa)"/>
+  </node>
+
+  <!-- move_base writes /cmd_vel_raw; cmd_vel_scale.py divides the angular
+       rate by the measured 1.41 chassis gain and republishes on /cmd_vel.
+       Without it every turn is 40 % stronger than DWA predicts. -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base"
+        output="screen">
+    <remap from="cmd_vel" to="/cmd_vel_raw"/>
+    <rosparam file="$(arg param_dir)/move_base_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/global_costmap_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/global_planner_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/local_costmap_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/dwa_local_planner_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+    <rosparam file="$(arg param_dir)/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+  </node>
+</launch>

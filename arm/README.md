@@ -2,6 +2,8 @@
 
 > English overview: [../README.en.md](../README.en.md). 本文件是中文详细说明。
 
+跨项目的运行分工、独立 ROS master 与数据边界见[整体架构](../docs/ARCHITECTURE.md)。
+
 Gazebo 里一个平面 2R 机械臂，配一个双滑块控制面板，滑块位置即目标角度。
 带 `--real` 启动时真机同步默认开启：对齐真机后滑块同时发真机，限位显示在开关旁边。
 

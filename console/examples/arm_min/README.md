@@ -1,37 +1,39 @@
-# arm_min — /TargetAngle 三级示例
+# arm_min — three ways to send `/TargetAngle`
 
-同一件事（给某个舵机发"目标角度 + 运动时长"）的三种写法，从裸命令到带保护。
+The same job — tell one servo "go to this angle, take this long" — written three
+ways, from a bare command to something with guards.
 
 ```bash
 source ../../env.sh
 
-# 0. 不写代码
+# 0. no code at all
 rostopic pub -1 /TargetAngle transbot_msgs/Arm \
   "{joint: [{id: 7, run_time: 800, angle: 100.0}]}"
 
-# 1. 最小发布者（28 行，核心 9 行）
+# 1. minimal publisher (28 lines, 9 of them core)
 python3 arm_simplest.py 7 100 800
 
-# 2. 带限位检查、连接等待与角度读回
+# 2. with limit checks, a subscriber wait and angle readback
 python3 arm_min.py 7 100 800
 ```
 
-| 方式 | 规模 | 特性 |
+| Approach | Size | What you get |
 |---|---:|---|
-| `rostopic pub` | 0 行 | 单次发布，验链路 |
-| `arm_simplest.py` | 28 行 | 参数化，无任何保护 |
-| `arm_min.py` | 69 行 | 限位、等订阅者、读回 |
-| `run_gui.sh` | 2900 行 | 完整界面 |
+| `rostopic pub` | 0 lines | one message, enough to prove the link |
+| `arm_simplest.py` | 28 lines | parameterised, no protection |
+| `arm_min.py` | 69 lines | limits, waits for subscribers, reads back |
+| `run_gui.sh` | 2900 lines | the full console |
 
-参数：`id` 7=底座 / 8=升降 / 9=夹爪，`angle` 为绝对角度，`run_time` 单位 ms 且不能为 0
-（驱动会静默丢弃）。
+Arguments: `id` 7 = base / 8 = lift / 9 = gripper, `angle` is absolute degrees,
+`run_time` is milliseconds and must not be 0 — the driver silently drops those.
 
-## 链路
+## The chain
 
 ```text
 /TargetAngle → transbot_node → set_uart_servo_angle(id, angle, run_time)
-             → /dev/ttyTHS1 → 总线舵机（内部闭环）
+             → /dev/ttyTHS1 → bus servos (closed loop inside the servo)
 ```
 
-客户端只发目标，角度闭环在舵机内部；`/CurrentAngle` 是独立读回服务，不参与控制。
-驱动不校验角度，限位保护在发送端。
+The client only sends a target; the loop closes inside the servo. `/CurrentAngle`
+is a separate readback service and takes no part in control. The driver does not
+validate angles — limit checking lives on the sending side.

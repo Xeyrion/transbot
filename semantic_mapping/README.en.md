@@ -2,6 +2,10 @@
 
 Stage 1 provides an offline semantic-mapping demonstration: multimodal recording, verified transfer, quality review, map rebuilding, RGB-D detection and localization, object fusion, replay and final-map export.
 
+![Semantic mapping replay](docs/images/semantic-mapping-demo.gif)
+
+See the [system architecture](../docs/ARCHITECTURE.md) for runtime ownership and project boundaries.
+
 ```bash
 cd ~/transbot/semantic_mapping
 bash run_en.sh

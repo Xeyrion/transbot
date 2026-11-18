@@ -1,0 +1,28 @@
+<launch>
+  <!-- SLAM + navigation at the same time.
+
+       gmapping publishes /map continuously and owns map->odom; move_base's
+       global costmap already reads /map (static_layer), so there is nothing
+       to switch: no map_server, no amcl.  The map just keeps growing while
+       the planner re-plans on it.
+
+       Caveats that come with this:
+         * every map update invalidates the plan, so the robot re-plans a lot
+         * loop closures move map->odom; the goal you clicked shifts with it
+         * unknown space is not plannable unless allow_unknown is on (it is),
+           which is why map_gui refuses goals on unknown cells
+  -->
+  <include file="$(dirname)/../nav/scripts/slam_test.launch"/>
+
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base"
+        output="screen">
+    <remap from="cmd_vel" to="/cmd_vel_raw"/>
+    <rosparam file="$(dirname)/../nav/param/move_base_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../nav/param/global_costmap_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../nav/param/global_planner_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../nav/param/local_costmap_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../nav/param/dwa_local_planner_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../nav/param/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+    <rosparam file="$(dirname)/../nav/param/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+  </node>
+</launch>

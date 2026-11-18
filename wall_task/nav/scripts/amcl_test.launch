@@ -1,0 +1,84 @@
+<launch>
+  <!-- map_server + AMCL on the control machine, so the test process is easy to
+       start and stop. Parameters are copied from the vendor's
+       transbot_nav/launch/library/amcl.launch, except recovery: the vendor sets
+       recovery_alpha_slow/fast to 0.0, which disables the random-particle
+       injection AMCL needs to recover from a wrong initial guess. They are left
+       at a small non-zero value here so a bad guess degrades gracefully instead
+       of silently staying wrong. -->
+
+  <arg name="map_file" default="$(dirname)/../../maps/fig8.yaml"/>
+  <arg name="initial_pose_x" default="0.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
+  <arg name="initial_pose_a" default="0.0"/>
+  <!-- AMCL's default initial covariance is 0.25 m^2, i.e. sigma 0.5 m. Left
+       at the default, the reported sigma says nothing about the map: it is
+       just the spread you asked for. Set it tight when the goal is to test
+       whether the scan agrees with the map at a known pose. -->
+  <arg name="initial_cov_xx" default="0.25"/>
+  <arg name="initial_cov_yy" default="0.25"/>
+  <arg name="initial_cov_aa" default="0.0685"/>
+
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(arg map_file)"/>
+
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <param name="use_map_topic"             value="true"/>
+    <param name="gui_publish_rate"          value="10.0"/>
+
+    <param name="min_particles"             value="1000"/>
+    <param name="max_particles"             value="5000"/>
+    <param name="kld_err"                   value="0.01"/>
+    <param name="kld_z"                     value="0.99"/>
+    <param name="resample_interval"         value="1"/>
+
+    <param name="laser_model_type"          value="likelihood_field"/>
+    <param name="laser_max_beams"           value="60"/>
+    <param name="laser_max_range"           value="8.0"/>
+    <param name="laser_min_range"           value="0.15"/>
+    <param name="laser_z_hit"               value="0.85"/>
+    <param name="laser_z_short"             value="0.05"/>
+    <param name="laser_z_max"               value="0.05"/>
+    <param name="laser_z_rand"              value="0.05"/>
+    <param name="laser_sigma_hit"           value="0.1"/>
+    <param name="laser_lambda_short"        value="0.1"/>
+    <param name="laser_likelihood_max_dist" value="2.0"/>
+
+    <param name="update_min_d"              value="0.10"/>
+    <param name="update_min_a"              value="0.10"/>
+
+    <param name="odom_model_type"           value="diff-corrected"/>
+    <!-- The vendor values were alpha1 0.25, alpha2 0.10, alpha3 0.05,
+         alpha4 0.10. In the diff-corrected model the rotation noise for one
+         step is sqrt(alpha1*rot^2 + alpha2*trans^2). With alpha2 = 0.10 and a
+         0.10 m update interval that injects sqrt(0.10*0.01) = 1.8 deg of
+         heading noise per step, which random-walks to about 8 deg over a 2 m
+         leg. Measured on 2026-11-04: sigma_yaw grew from 2.9 to 4.8 deg while
+         driving, and the reported path drifted 4 deg / 10 cm sideways.
+
+         The chassis does not deserve that: its yaw comes from an EKF fusing
+         the IMU, and was validated against lidar scan matching at
+         ekf_gain 0.9994 (notes/06). So alpha2 is cut to 0.005, i.e. about
+         0.35 deg per 0.10 m step. alpha1 stays generous for turns, where the
+         chassis really does overshoot by 1.4x. -->
+    <param name="odom_alpha1"               value="0.10"/>
+    <param name="odom_alpha2"               value="0.005"/>
+    <param name="odom_alpha3"               value="0.01"/>
+    <param name="odom_alpha4"               value="0.01"/>
+
+    <param name="odom_frame_id"             value="odom"/>
+    <param name="base_frame_id"             value="base_footprint"/>
+    <param name="global_frame_id"           value="map"/>
+    <param name="transform_tolerance"       value="0.5"/>
+
+    <param name="recovery_alpha_slow"       value="0.001"/>
+    <param name="recovery_alpha_fast"       value="0.01"/>
+
+    <param name="initial_pose_x"            value="$(arg initial_pose_x)"/>
+    <param name="initial_pose_y"            value="$(arg initial_pose_y)"/>
+    <param name="initial_pose_a"            value="$(arg initial_pose_a)"/>
+    <param name="initial_cov_xx"            value="$(arg initial_cov_xx)"/>
+    <param name="initial_cov_yy"            value="$(arg initial_cov_yy)"/>
+    <param name="initial_cov_aa"            value="$(arg initial_cov_aa)"/>
+  </node>
+</launch>

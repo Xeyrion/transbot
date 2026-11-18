@@ -1,0 +1,48 @@
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Install offline-test dependencies
+        run: python -m pip install 'numpy<2' 'Pillow<10' 'PyYAML<7' 'opencv-python-headless<4.12'
+      - name: Check architecture index, document links and source package
+        run: python tools/check_repository.py
+      - name: Test documentation and publication checks
+        run: python -m unittest discover -s tools/tests
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do
+            case "$file" in *.sh) bash -n "$file" ;; esac
+          done < <(git ls-files -z)
+      - name: Check YAML configurations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess, yaml
+          names = subprocess.check_output(['git', 'ls-files', '-z']).decode().strip('\0').split('\0')
+          for name in names:
+              if Path(name).suffix in ('.yaml', '.yml'):
+                  yaml.safe_load(Path(name).read_text(encoding='utf-8'))
+          PY
+      - name: Test arm kinematics
+        run: python -m unittest discover -s arm/tests
+      - name: Test wall-task kinematics
+        run: python -m unittest discover -s wall_task/wallline/tests
+      - name: Test wall-task map geometry
+        working-directory: wall_task/task_gui
+        run: python -m unittest discover -p test_mapdata.py
+      - name: Test offline semantic tools
+        run: python -m unittest discover -s semantic_mapping/tests

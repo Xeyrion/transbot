@@ -1,0 +1,65 @@
+<launch>
+  <!-- Full navigation stack on the control machine: map_server + AMCL from
+       amcl_test.launch, plus move_base driven by local copies of the vendor
+       parameters.
+
+       The parameters are loaded from wall_task/nav/param/, not from the
+       robot's transbot_nav package. That keeps the vendor files untouched and
+       makes every change here reversible: the originals are still on the robot
+       and dwa_local_planner_params.yaml.orig sits next to the tuned copy.
+
+       What was changed in dwa_local_planner_params.yaml, and why:
+         min_vel_theta   0.10 -> 0.20   commanding 0.10 rad/s produces only
+                                        0.022 rad/s on this chassis, so DWA was
+                                        planning turns the robot never makes
+         max_vel_theta   0.30 -> 0.28   the chassis turns 1.41x faster than
+                                        commanded; capping the request keeps the
+                                        actual rate near the prediction
+         min_vel_trans   0.03 -> 0.06   below 0.08 m/s is untested on this
+                                        chassis, and a stalled sample looks like
+                                        an obstacle to DWA
+         xy_goal_tolerance 0.05 -> 0.12 AMCL sigma is 0.046 m, so 5 cm cannot
+                                        be distinguished from "one sigma away"
+         yaw_goal_tolerance 0.12 -> 0.15 map yaw scatter is about 4 deg
+  -->
+
+  <arg name="map_file" default="$(dirname)/../../maps/fig8.yaml"/>
+  <arg name="initial_pose_x" default="0.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
+  <arg name="initial_pose_a" default="0.0"/>
+
+  <include file="$(dirname)/amcl_test.launch">
+    <arg name="map_file" value="$(arg map_file)"/>
+    <arg name="initial_pose_x" value="$(arg initial_pose_x)"/>
+    <arg name="initial_pose_y" value="$(arg initial_pose_y)"/>
+    <arg name="initial_pose_a" value="$(arg initial_pose_a)"/>
+    <arg name="initial_cov_xx" value="0.0025"/>
+    <arg name="initial_cov_yy" value="0.0025"/>
+    <arg name="initial_cov_aa" value="0.0025"/>
+  </include>
+
+  <!-- move_base writes /cmd_vel directly.
+
+       cmd_vel_scale.py can invert the chassis's angular model (dead zone
+       0.15 rad/s, gain 1.4x) and it does so correctly, but it was measured to
+       make the gait worse, not better: DWA's angular output flips sign by
+       +-0.03 rad/s at 10 Hz, and the dead-zone offset turns every one of
+       those noisy samples into a real rotation. Heading drift went from 0.9
+       to 16.6 deg over the same 1.4 m leg. The code stays in the repository
+       for a controller that produces a smooth angular command; DWA does not.
+  -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base"
+        output="screen">
+    <!-- move_base's command goes through cmd_vel_scale.py, which
+         divides the angular rate by the measured 1.41 gain.  Without
+         it every turn is 40 % stronger than DWA predicts. -->
+    <remap from="cmd_vel" to="/cmd_vel_raw"/>
+    <rosparam file="$(dirname)/../param/move_base_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../param/global_costmap_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../param/global_planner_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../param/local_costmap_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../param/dwa_local_planner_params.yaml" command="load"/>
+    <rosparam file="$(dirname)/../param/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+    <rosparam file="$(dirname)/../param/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+  </node>
+</launch>

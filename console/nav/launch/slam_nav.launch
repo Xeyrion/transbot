@@ -1,0 +1,24 @@
+<launch>
+  <!-- Map and navigate at the same time: gmapping plus move_base on the live
+       /map. No map_server, no AMCL: the pose comes from gmapping's
+       map->odom, so there is exactly one owner of that transform.
+
+       What this costs, and why it is still useful: every map update can
+       invalidate the plan, so the robot re-plans a lot, and a loop closure
+       shifts the map under the goal. See nav/README.md. -->
+  <arg name="param_dir" default="$(dirname)/../param"/>
+
+  <include file="$(dirname)/map.launch"/>
+
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base"
+        output="screen">
+    <remap from="cmd_vel" to="/cmd_vel_raw"/>
+    <rosparam file="$(arg param_dir)/move_base_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/global_costmap_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/global_planner_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/local_costmap_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/dwa_local_planner_params.yaml" command="load"/>
+    <rosparam file="$(arg param_dir)/costmap_common_params.yaml" command="load" ns="global_costmap"/>
+    <rosparam file="$(arg param_dir)/costmap_common_params.yaml" command="load" ns="local_costmap"/>
+  </node>
+</launch>

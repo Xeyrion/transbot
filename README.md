@@ -6,18 +6,24 @@ Yahboom Transbot 履带机器人的语义建图、遥控、机械臂与墙面任
 
 ## 项目入口
 
+<!-- projects:start -->
 | 项目 | 目录 | 当前范围 |
 |---|---|---|
-| **语义建图工作台** | [semantic_mapping/](semantic_mapping/README.md) | 多模态录制、校验回传、二维建图、RGB-D 语义定位与回放；第一阶段演示完成 |
-| PC 遥控台 | [console/](console/README.md) | 底盘、外设、机械臂、相机及建图导航 |
+| 语义建图工作台 | [semantic_mapping/](semantic_mapping/README.md) | 多模态录制、校验回传、二维建图与 RGB-D 语义回放；第一阶段演示完成 |
+| PC 遥控台 | [console/](console/README.md) | 底盘、外设、机械臂、相机及在线建图导航 |
 | 2R 机械臂 | [arm/](arm/README.md) | 实测运动学、Gazebo 仿真与真机同步 |
 | 墙面任务台 | [wall_task/](wall_task/README.md) | 导航、对准与竖线规划；完整画线流程仍待真机验证 |
+<!-- projects:end -->
 
 各项目独立启动。语义建图的阶段完成范围和后续研究见[阶段总结](semantic_mapping/docs/stage_01.md)。
 
 ## 语义建图工作台
 
 **Transbot Semantic Mapping Studio** 已贯通采集 → 数据检查 → 地图重建 → 物品识别与定位 → 语义回放 → 最终地图导出。常用方案为 YOLO26s 与 YOLO26s 分割，结果按录制会话管理。
+
+![语义地图回放演示](semantic_mapping/docs/images/semantic-mapping-demo.gif)
+
+*彩色识别框、深度和地图物品候选点同时回放。*
 
 ```bash
 cd ~/transbot/semantic_mapping
@@ -26,6 +32,23 @@ bash run_en.sh    # English
 ```
 
 源码与大数据分开：本机 `paths.local.json` 引用现有 bag 与模型位置，数据保持原处。仓库不包含原始包、标注数据集、模型权重和批量生成结果。初次配置见[项目说明](semantic_mapping/README.md#源码与数据分开)。
+
+## 总体架构
+
+```mermaid
+flowchart LR
+  Host["Windows：开发 / Git / 标注"] --> PC["Ubuntu 控制机"]
+  PC --> S["语义工作台：录制控制 / 离线建图"]
+  PC --> C["遥控台：在线控制 / 导航"]
+  PC --> A["机械臂：仿真 / 可选真机同步"]
+  PC --> W["墙面任务：导航 / 对准 / 画线"]
+  S <-->|SSH / 校验回传| R["Jetson：ROS master / 硬件 / 本地录制"]
+  C <-->|ROS| R
+  W <-->|ROS| R
+  A -.->|UDP| R
+```
+
+四个应用独立运行，共用同一机器人时需要明确控制权。在线导航在控制机计算；机器人负责硬件驱动。离线语义研究读取已有包，不要求机器人在线。完整的模块边界、数据流、坐标前提及文档维护规则见 **[整体架构说明](docs/ARCHITECTURE.md)**。
 
 ## 其他入口
 
@@ -47,7 +70,7 @@ bash start_task.sh --offline
 
 ![机械臂实机演示](arm/screenshots/arm-demo.gif)
 
-![墙面任务导航演示](wall_task/navigation-demo.gif)
+![墙面任务导航演示](wall_task/docs/images/navigation-demo.gif)
 
 ## 运行分工
 
@@ -74,6 +97,8 @@ transbot/
 本机旧 `bagtools/` 若仍存在，仅保存原位置的数据、模型、结果或历史 Git 备份，不是新版启动目录；不要移动其中的原始数据。控制机数据仍在 `~/robot_research/bagtools/`，由新项目本机配置引用。
 
 源码及当前说明由 Git 管理。提交前用 `git status` 核对范围；大数据、运行产物、本机配置与工具缓存均忽略。子项目原有记录与 Transbot 历史一起保留，不再在源码目录中嵌套独立仓库。
+
+项目表来自 `docs/projects.json`，修改后运行 `python3 tools/check_repository.py --write-index`。提交文件后运行 `python3 tools/check_repository.py` 检查入口、文档链接和发布范围；GitHub Actions 自动重复检查与离线测试。详见[架构和文档约定](docs/ARCHITECTURE.md#文档如何保持一致)。
 
 ## 环境与硬件参数
 

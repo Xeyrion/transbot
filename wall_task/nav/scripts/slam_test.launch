@@ -1,0 +1,59 @@
+<launch>
+    <!-- Local copy of transbot_nav/launch/library/gmapping.launch, so the
+         whole mapping stack can run on the control machine instead of the
+         robot. Params follow the robot's file (minimumScore 50, delta 0.05,
+         +-20 m) with two deliberate differences:
+
+           * it subscribes to /scan_filtered, which drops the robot's own
+             antenna/camera returns;
+           * particles 60 instead of the vendor's 30. The 2026-11-03 maps
+             were plain rectangles with a single loop; a figure-8 around two
+             tables closes two loops, and 30 particles tend to deplete at the
+             second one (the correct particle gets weight ~0 and the pose
+             jumps). The control machine has six idle cores, so the extra
+             particles cost nothing measurable.
+
+         Usage:  roslaunch /path/to/slam_test.launch -->
+    <node pkg="gmapping" type="slam_gmapping" name="slam_gmapping"
+          output="screen">
+        <remap from="scan" to="/scan_filtered"/>
+
+        <param name="base_frame" value="base_footprint"/>
+        <param name="odom_frame" value="odom"/>
+        <param name="map_frame" value="map"/>
+
+        <param name="map_update_interval" value="1.0"/>
+        <param name="maxUrange" value="8.0"/>
+        <param name="maxRange" value="12.0"/>
+        <param name="sigma" value="0.05"/>
+        <param name="kernelSize" value="1"/>
+        <param name="lstep" value="0.05"/>
+        <param name="astep" value="0.05"/>
+        <param name="iterations" value="1"/>
+        <param name="lsigma" value="0.075"/>
+        <param name="ogain" value="3.0"/>
+        <param name="lskip" value="0"/>
+        <param name="minimumScore" value="50"/>
+        <param name="srr" value="0.1"/>
+        <param name="srt" value="0.2"/>
+        <param name="str" value="0.1"/>
+        <param name="stt" value="0.2"/>
+        <param name="linearUpdate" value="0.1"/>
+        <param name="angularUpdate" value="0.3"/>
+        <param name="temporalUpdate" value="-1.0"/>
+        <param name="resampleThreshold" value="0.5"/>
+        <param name="particles" value="60"/>
+        <param name="xmin" value="-20.0"/>
+        <param name="ymin" value="-20.0"/>
+        <param name="xmax" value="20.0"/>
+        <param name="ymax" value="20.0"/>
+        <param name="delta" value="0.05"/>
+        <param name="llsamplerange" value="0.01"/>
+        <param name="llsamplestep" value="0.01"/>
+        <param name="lasamplerange" value="0.005"/>
+        <param name="lasamplestep" value="0.005"/>
+        <param name="transform_publish_period" value="0.01"/>
+        <param name="tf_delay" value="0.1"/>
+        <param name="buffer_size" value="100"/>
+    </node>
+</launch>

@@ -10,7 +10,7 @@
 #   ./gazebo/run_simple.sh -- --lang en          # English panel
 #
 # Arguments before "--" go to roslaunch, after "--" go to arm_simple_gui.py.
-# Ctrl-C stops the Gazebo scene and the panel started by this script.
+# The scene is detached; stop_simple.sh stops it. Closing the panel leaves it running.
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

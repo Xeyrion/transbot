@@ -1,5 +1,7 @@
 # 项目架构
 
+跨项目的主机分工、控制权和文档维护以[整体架构](../../docs/ARCHITECTURE.md)为准。本页只说明语义工作台内部实现。
+
 工作台 `workbench.py` 提供两个入口：录制控制与数据阅读。实际传感器原图在机器人本地录制，控制机通过 SSH 发命令、查看状态和回传会话。
 
 数据阅读 `bag_quality_gui.py` 负责会话列表、分析、预览、查看和建图任务。Python2 常驻阅读器 `bag_viewer_server.py` 读取 ROS bag，两个 Python 版本共用 `viewer_core.py` 的分卷、坐标与地图关联规则。

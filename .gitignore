@@ -53,3 +53,6 @@ _local/
 *.part
 paths.local.json
 runs/
+
+# Keep the original capture locally; publish the optimized web demonstration.
+/wall_task/navigation-demo.gif

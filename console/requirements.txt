@@ -2,7 +2,8 @@
 # Tested on: Ubuntu 18.04 + ROS Melodic + Python 3.6 (control PC VM).
 # ROS packages (apt): ros-melodic-teleop-twist-keyboard, ros-melodic-cv-bridge,
 #   python3-tk, rqt-image-view, rviz
-# Versions intentionally unpinned: memorial snapshot, install latest py3 wheels.
+# Use wheels compatible with the selected Python version. ROS Melodic's Python
+# environment and the semantic project's YOLO Conda environment are separate.
 opencv-python
 numpy
 Pillow

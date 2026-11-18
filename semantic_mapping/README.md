@@ -4,6 +4,10 @@
 
 从 RGB-D 与二维雷达录制，到数据检查、二维地图重建、物品识别、三维定位及语义回放的控制机工具。当前阶段已完成可演示的离线流程，范围见[阶段总结](docs/stage_01.md)。
 
+![语义地图回放演示](docs/images/semantic-mapping-demo.gif)
+
+整个仓库的主机分工与项目边界见[整体架构](../docs/ARCHITECTURE.md)。
+
 ```bash
 cd ~/transbot/semantic_mapping
 bash run.sh               # 中文工作台

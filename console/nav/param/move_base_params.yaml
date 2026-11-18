@@ -1,0 +1,40 @@
+# Planner Plugins
+base_global_planner: "global_planner/GlobalPlanner"
+base_local_planner:  "dwa_local_planner/DWAPlannerROS"
+
+# Frequencies & Execution Rates
+controller_frequency: 10.0      # Local controller loop rate (10 Hz)
+planner_frequency:    1.0       # Re-evaluates global path at 1 Hz for dynamic obstacles
+
+# Timeouts & Tolerances
+planner_patience:     5.0       # Max wait time for a global plan before recovery
+controller_patience:  5.0       # Max wait time for a valid trajectory before recovery
+max_planning_retries: -1.0      # -1 = Infinite retries until patience runs out
+
+# Oscillation Prevention (Tuned for 5 cm target settling)
+oscillation_timeout:  5.0       # Seconds of stuck movement before triggering recovery
+oscillation_distance: 0.08      # Movement threshold (meters) to reset oscillation timer
+
+# Recovery Behavior Settings
+recovery_behavior_enabled: false
+clearing_rotation_allowed: false # Prevents violent high-speed in-place track scrubbing
+shutdown_costmaps: false
+
+recovery_behaviors:
+  - name: 'conservative_reset'
+    type: 'clear_costmap_recovery/ClearCostmapRecovery'
+  - name: 'aggressive_reset'
+    type: 'clear_costmap_recovery/ClearCostmapRecovery'
+  - name: 'clearing_rotation'
+    type: 'rotate_recovery/RotateRecovery'
+
+# Layer Clearing Thresholds
+conservative_reset:
+  reset_distance: 1.0           # Clears dynamic obstacles further than 1.0 m
+  layer_names: [obstacle_layer] # Preserves static map
+
+aggressive_reset:
+  reset_distance: 0.0           # Wipes all dynamic obstacle cells to unstick
+  layer_names: [obstacle_layer]
+
+conservative_reset_dist: 1.0

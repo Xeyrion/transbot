@@ -1,6 +1,6 @@
 # Advanced: lidar / line-follow / mapping notes
 
-All of these consume vendor stacks on the robot side; this repo only provides thin launchers plus the GUI.
+Hardware demonstrations consume vendor packages on the robot. The GUI's online mapping and navigation stack runs on the control PC; see the [system architecture](../../docs/ARCHITECTURE.md).
 
 ## Arm control (`tasks/07`–`08`, `examples/arm_min/`)
 
@@ -33,15 +33,18 @@ bash tasks/06-line-follow.sh
 
 Place the robot on a black line with the camera facing down before launching. Requires vendor `transbot_linefollow`.
 
-## Mapping & navigation (robot side)
+## Mapping & navigation (control PC)
 
-Run the vendor `transbot_nav` launches **on the robot** (mapping needs stable local `/scan`+`/odom`):
+Use the GUI's three modes, implemented by [nav/](../nav/README.md):
 
-- Mapping: vendor map launch with `map_type:=gmapping open_rviz:=false`, then `map_server map_saver -f <name>` to save.
-- Navigation: vendor navigation launch with an existing map.
-- This PC only visualizes: `bash tasks/03-view-mapping.sh`.
+- Mapping: gmapping consumes the robot's scan, odometry and TF, with a local scan filter.
+- Navigation: map_server, AMCL and move_base use a saved map.
+- Map + navigate: gmapping and move_base use the live map.
+- `bash tasks/03-view-mapping.sh` adds an optional RViz view.
 
-## What NOT to run on the control PC
+The vendor procedure printed by `tasks/10-mapping-ssh.sh` is an alternative, not a prerequisite. One online stack should own the robot graph at a time.
+
+## Hardware ownership
 
 - Base driver / bringup launches: they need the robot's serial device and vendor libs; they always fail on the PC.
-- Mapping nodes over WiFi: works in theory, drops packets in practice — keep them on the robot.
+- Mapping and navigation nodes do not access the serial device. Their WiFi link quality still matters and should be checked during robot validation.
