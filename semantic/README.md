@@ -13,6 +13,6 @@ STEP=1 MAX_FRAMES=120 bash semantic/run_semantic.sh bags/<会话>/<首卷>.bag
 
 算法细节见 [semantic_algorithm.md](../docs/semantic_algorithm.md)，标定步骤见 [calibration.md](../docs/calibration.md)。物品点代表可见表面样本；动态类别默认不加入静态地图。裂缝数据集暂未开始，不把已有通用类别模型视为裂缝模型。
 
-本轮 COCO 试跑及模型对照：`results/semantic/session_20261117_071239_demo/README.md`。
+本轮 COCO 试跑及模型对照：`bags/session_20261117_071239/semantic/cam_20261117_071320/comparisons/session_20261117_071239_demo/README.md`。
 使用 138 组相同 RGB-D、已重建地图和记录外参，对比现有 YOLO26n 与 YOLO26s；输出包含二维拒绝记录和地图候选，不将候选数视为真实物品数。
 带 `MAP_ASSOCIATION` 可显式使用独立重建结果；`SEMANTIC_WEIGHTS` 选择预训练权重，无需下载 COCO 训练数据集。

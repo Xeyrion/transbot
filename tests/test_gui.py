@@ -188,6 +188,13 @@ while True:
         self.gui.PROBE=str(probe)
         app=self.gui.App(self.root,str(self.folder));self.root.update()
         self.assertEqual(app.mode,'sessions');self.assertFalse(app.body.winfo_ismapped())
+        app.catalog.selection_set(app.catalog.get_children()[0])
+        pointer = Path(self.gui.map_manifest_path(str(session/'cam_test_0.bag')))
+        pointer.parent.mkdir(parents=True)
+        pointer.touch()
+        with patch.object(self.gui,'BagViewer') as viewer:
+            self.root.nametowidget(str(app.btn_semantic['menu'])).invoke(1)
+            viewer.assert_called_once_with(self.root,str(session),'cam_test_0.bag',preset='yolo26s-seg')
         app.catalog.selection_set(app.catalog.get_children()[0]);app.open_session();self.root.update()
         self.assertEqual(app.mode,'bags');self.assertEqual(len(app.tree.get_children()),1)
         start=time.monotonic();app._show_preview('cam_test_0.bag')

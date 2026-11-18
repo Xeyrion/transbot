@@ -162,6 +162,12 @@ class App(object):
         self.btn_stop.pack(side='left', padx=4)
         self.btn_map = ttk.Button(actions,text=tr('建图 / 重新建图'),command=self.build_map)
         self.btn_map.pack(side='left',padx=4)
+        self.btn_semantic = ttk.Menubutton(actions, text=tr('生成语义地图'))
+        semantic_menu = tk.Menu(self.btn_semantic, tearoff=False)
+        for key, title in SEMANTIC_PRESETS.items():
+            semantic_menu.add_command(label=title, command=lambda preset=key: self.generate_semantic(preset))
+        self.btn_semantic.configure(menu=semantic_menu)
+        self.btn_semantic.pack(side='left', padx=4)
 
         self.var_status = tk.StringVar(value=tr('就绪'))
         tk.Label(actions, textvariable=self.var_status, bg=BG, fg=DIM).pack(side='left', padx=12)
@@ -463,37 +469,57 @@ class App(object):
         self.var_status.set(tr('已请求停止（当前这个包跑完就停）'))
 
     def _choose_mapping_group(self, groups):
-        dialog=tk.Toplevel(self.root);dialog.title(tr('选择要建图的录制'));dialog.transient(self.root)
+        dialog=tk.Toplevel(self.root);dialog.title(tr('选择录制'));dialog.transient(self.root)
         tk.Label(dialog,text=tr('文件夹包含多次录制，请选择一组分卷。')).pack(padx=16,pady=12)
         choice=ttk.Combobox(dialog,state='readonly',width=54,
             values=['%s (%d)'%(os.path.basename(g[0]),len(g)) for g in groups]);choice.current(0);choice.pack(padx=16,pady=4)
         result=[]
         def accept():result.append(groups[choice.current()][0]);dialog.destroy()
-        ttk.Button(dialog,text=tr('建图'),command=accept).pack(padx=16,pady=12)
+        ttk.Button(dialog,text=tr('确定'),command=accept).pack(padx=16,pady=12)
         dialog.grab_set();self.root.wait_window(dialog)
         return result[0] if result else None
+
+    def _selected_recording(self, title):
+        if self.mode=='sessions':
+            selected=self.catalog.selection()
+            if not selected:
+                messagebox.showinfo(title,tr('请先选中一个会话文件夹。'),parent=self.root);return None
+            entry=self._session_entries[int(selected[0])]
+            if entry['active']:
+                messagebox.showinfo(tr('会话正在录制'),tr('请先停止录制并等待分卷关闭。'),parent=self.root);return None
+            folder=entry['path']
+        else:
+            folder=self.folder;selected=self.tree.selection()
+            if selected:
+                return os.path.join(folder,selected[0])
+        groups=recording_groups(folder)
+        if not groups:raise ValueError(tr('没有可建图的录制数据。'))
+        return groups[0][0] if len(groups)==1 else self._choose_mapping_group(groups)
+
+    def generate_semantic(self, preset):
+        if self.busy or self._mapping_proc is not None:
+            return
+        title = tr('生成语义地图')
+        try:
+            bag = self._selected_recording(title)
+            if bag is None:
+                return
+            if not os.path.isfile(map_manifest_path(bag)):
+                messagebox.showinfo(title, tr('这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。'), parent=self.root)
+                return
+            folder, name = os.path.split(bag)
+            BagViewer(self.root, folder, name, preset=preset)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(title, str(exc), parent=self.root)
 
     def build_map(self):
         if self.busy or self._mapping_proc is not None:return
         if self._mapping_window is not None:
             self._mapping_window.destroy();self._mapping_window=None
-        if self.mode=='sessions':
-            selected=self.catalog.selection()
-            if not selected:
-                messagebox.showinfo(tr('建图'),tr('请先选中一个会话文件夹。'),parent=self.root);return
-            entry=self._session_entries[int(selected[0])]
-            if entry['active']:
-                messagebox.showinfo(tr('会话正在录制'),tr('请先停止录制并等待分卷关闭。'),parent=self.root);return
-            folder=entry['path'];bag=None
-        else:
-            folder=self.folder;selected=self.tree.selection()
-            bag=os.path.join(folder,selected[0]) if selected else None
         try:
-            if bag is None:
-                groups=recording_groups(folder)
-                if not groups:raise ValueError(tr('没有可建图的录制数据。'))
-                bag=groups[0][0] if len(groups)==1 else self._choose_mapping_group(groups)
-                if bag is None:return
+            bag = self._selected_recording(tr('建图'))
+            if bag is None:return
+            folder = os.path.dirname(bag)
             previous=map_artifacts(bag)
             if previous and not messagebox.askyesno(tr('替换已有地图？'),
                     tr('已存在地图。是否用本次数据重新建图并替换当前地图？\n旧地图会保留备份，原始 bag 不会修改。'),parent=self.root):return
@@ -503,7 +529,7 @@ class App(object):
             with (job/'console.log').open('ab') as log:
                 self._mapping_proc=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             self._mapping_job=job;self._mapping_bag=bag;self.busy=True
-            for button in (self.btn_all,self.btn_one,self.btn_map,self.btn_rename):button.configure(state='disabled')
+            for button in (self.btn_all,self.btn_one,self.btn_map,self.btn_semantic,self.btn_rename):button.configure(state='disabled')
             self._mapping_window=tk.Toplevel(self.root);self._mapping_window.title(tr('会话建图'))
             self._mapping_window.geometry('660x370');self._mapping_window.transient(self.root)
             tk.Label(self._mapping_window,text=os.path.basename(folder),anchor='w').pack(fill='x',padx=12,pady=10)
@@ -549,7 +575,7 @@ class App(object):
         code=self._mapping_proc.poll()
         if code is None:return
         self._mapping_proc=None;self.busy=False;self._mapping_spinner.stop()
-        self.btn_map.configure(state='normal');self.btn_rename.configure(state='normal')
+        self.btn_map.configure(state='normal');self.btn_semantic.configure(state='normal');self.btn_rename.configure(state='normal')
         self.btn_all.configure(state='normal' if self.mode=='bags' else 'disabled')
         self.btn_one.configure(state='normal' if self.mode=='bags' else 'disabled')
         if status.get('state')=='complete' and code==0:
@@ -743,7 +769,7 @@ class BagViewer(tk.Toplevel):
     一帧的结果。常驻是为了不用每次重新打开 bag —— 2 GB 的包重开一次要好几秒。
     """
 
-    def __init__(self, master, folder, bag):
+    def __init__(self, master, folder, bag, preset=None):
         tk.Toplevel.__init__(self, master)
         self.title(tr('查看：') + bag)
         self.configure(bg=BG)
@@ -791,6 +817,7 @@ class BagViewer(tk.Toplevel):
         self._semantic_runs = []
         self._semantic_proc = None
         self._semantic_poll_job = None
+        self._initial_preset = preset
         self._resize_job = self._export_poll_job = None
         self._layout_job=None
         self._layout_initialized=False
@@ -1333,6 +1360,9 @@ class BagViewer(tk.Toplevel):
             self._update_context(info)
             self._load_phase=tr('正在准备第一帧')
             self._set_controls(True)
+            if self._initial_preset:
+                preset, self._initial_preset = self._initial_preset, None
+                self._generate_semantic(preset)
             return
         context = d.pop('context', None)
         if context:

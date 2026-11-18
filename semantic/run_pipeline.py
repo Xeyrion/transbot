@@ -40,7 +40,8 @@ def main():
     else:
         parent = os.environ.get('BAGTOOLS_RESULTS_DIR', semantic_directory(sources[0]))
         os.makedirs(parent, exist_ok=True)
-        out = tempfile.mkdtemp(prefix=datetime.datetime.utcnow().strftime('run_%Y%m%d_%H%M%S_'), dir=parent)
+        stamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        out = tempfile.mkdtemp(prefix='{}_{}_'.format(args.preset or 'run', stamp), dir=parent)
     manifest = dict(schema_version=2, run_id=os.path.basename(out), state='running',
         sources=[dict(path=p, size=os.path.getsize(p), mtime=os.path.getmtime(p)) for p in sources],
         source_fingerprint_kind='size_mtime; not content checksum', stages=[],
@@ -96,11 +97,14 @@ def main():
                 files={n:digest(os.path.join(models,n)) for n in ['yolov3-tiny.cfg','yolov3-tiny.weights','coco.names']})
         else:
             raise ValueError('Unsupported backend: '+backend)
-        linked = association(sources[0], manifest=settings.get('MAP_ASSOCIATION'))
+        base_manifest = settings.get('MAP_ASSOCIATION')
+        linked = association(sources[0], manifest=base_manifest)
         if args.preset and not linked:
             raise ValueError('Build the base map for this recording before generating semantic objects.')
         if linked:
             snapshot = snapshot_map(out, linked)
+            if association(sources[0], manifest=base_manifest) != linked:
+                raise ValueError('Base map changed while copying it. Retry after map building ends.')
             manifest['replay_map'] = snapshot
             snapshot_association = os.path.join(out, 'base_map_association.json')
             snapshot_link = dict(linked, yaml=snapshot['yaml'], trajectory=snapshot['trajectory'])
