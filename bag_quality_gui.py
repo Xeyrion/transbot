@@ -814,6 +814,7 @@ class BagViewer(tk.Toplevel):
         self._semantic_runs = []
         self._semantic_proc = None
         self._semantic_poll_job = None
+        self._semantic_started = None
         self._initial_preset = preset
         self._resize_job = self._export_poll_job = None
         self._layout_job=None
@@ -880,6 +881,7 @@ class BagViewer(tk.Toplevel):
         self._controls += [self.slider, export_button, self.btn_frame]
 
         semantic_bar = tk.Frame(self, bg=BG)
+        self.semantic_bar = semantic_bar
         semantic_bar.pack(fill='x', padx=12, pady=3)
         tk.Label(semantic_bar, text=tr('语义回放'), bg=BG, fg=DIM).pack(side='left')
         self.var_semantic = tk.StringVar(value=tr('原始数据'))
@@ -921,10 +923,17 @@ class BagViewer(tk.Toplevel):
         more_menu.add_checkbutton(label=tr('显示全部历史结果'), variable=self.var_all_runs,
                                  command=self._refresh_semantic_choices)
         more_menu.add_command(label=tr('加载语义结果…'), command=self._load_semantic)
+        more_menu.add_separator()
+        more_menu.add_command(label=tr('语义生成说明'), command=self._semantic_help)
         self.var_map_scale = tk.StringVar()
         tk.Label(semantic_bar, textvariable=self.var_map_scale, bg=BG, fg=DIM).pack(side='left', padx=5)
-        self.var_generation = tk.StringVar(value=tr('栅格底图可选；物品三维定位需要有效深度、相机内外参和机器人位姿。'))
-        ttk.Label(self, textvariable=self.var_generation, wraplength=1050).pack(fill='x', padx=12)
+        self.var_generation = tk.StringVar()
+        # Only occupy a status row after an explicit generation request.
+        self.semantic_status = tk.Frame(self, bg=BG)
+        self.semantic_progress = ttk.Progressbar(self.semantic_status, mode='indeterminate', length=110)
+        self.semantic_status_label = tk.Label(self.semantic_status, textvariable=self.var_generation,
+                                             bg=BG, fg=DIM, anchor='w', wraplength=1000)
+        self.semantic_status_label.pack(side='left', fill='x', expand=True)
         self._set_controls(False)
 
         self.var_semantic_note = tk.StringVar()
@@ -1170,6 +1179,7 @@ class BagViewer(tk.Toplevel):
             return
         title = SEMANTIC_PRESETS[preset]
         bag = os.path.join(self.folder, self.bag)
+        self._semantic_started = time.monotonic()
         try:
             results = semantic_directory(bag)
             logs = os.path.join(results, 'logs')
@@ -1182,10 +1192,28 @@ class BagViewer(tk.Toplevel):
                 self._semantic_proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
                                                        stderr=subprocess.STDOUT, start_new_session=True)
         except (OSError, ValueError) as exc:
-            self.var_generation.set(tr('语义地图生成失败：') + str(exc))
+            self._set_generation_status(tr('语义地图生成失败：') + str(exc))
             return
         self.generate_button.state(['disabled'])
         self._poll_semantic_generation(title, bag)
+
+    def _semantic_help(self):
+        messagebox.showinfo(tr('语义生成说明'), tr(
+            '栅格底图可选；物品三维定位需要有效深度、相机内外参和机器人位姿。\n'
+            '没有底图时使用 odom 坐标，位置可能随里程计累计漂移。\n'
+            '生成时显示当前阶段和已用时间；动态进度条表示任务仍在运行，不代表完成百分比。\n'
+            '结果保存在当前录制目录，可从“地图图库”或“更多 → 结果目录”打开。'), parent=self)
+
+    def _set_generation_status(self, text, running=False):
+        self.var_generation.set(text)
+        self.semantic_status.pack(after=self.semantic_bar, fill='x', padx=12, pady=(0, 2))
+        if running:
+            if not self.semantic_progress.winfo_manager():
+                self.semantic_progress.pack(side='left', before=self.semantic_status_label, padx=(0, 8))
+                self.semantic_progress.start(15)
+        else:
+            self.semantic_progress.stop()
+            self.semantic_progress.pack_forget()
 
     def _poll_semantic_generation(self, title, bag):
         self._semantic_poll_job = None
@@ -1199,10 +1227,15 @@ class BagViewer(tk.Toplevel):
                       'detect': tr('正在识别'), 'fuse_render': tr('正在融合并保存')}
             stages = run.get('stages', [])
             stage = stages[-1]['name'] if stages else None
-            self.var_generation.set('%s · %s' % (title, labels.get(stage, tr('正在准备生成'))))
+            elapsed = max(0, int(time.monotonic() - self._semantic_started))
+            clock = '%d:%02d' % (elapsed // 60, elapsed % 60)
+            self._set_generation_status('%s · %s · %s' % (
+                title, labels.get(stage, tr('正在准备生成')), tr('已用 %s') % clock), running=True)
             self._semantic_poll_job = self.after(500, self._poll_semantic_generation, title, bag)
             return
         self._semantic_proc = None
+        self.semantic_progress.stop()
+        self.semantic_progress.pack_forget()
         self.generate_button.state(['!disabled'])
         if code == 0 and run.get('state') == 'complete':
             discovered = discover_runs(bag)
@@ -1215,11 +1248,11 @@ class BagViewer(tk.Toplevel):
             else:
                 text = tr('%s 已生成，可在地图图库查看。') % title
             if run.get('world_frame') == 'odom':
-                text += ' ' + tr('此结果使用里程计坐标（odom），位置可能随里程计累计漂移。')
+                text += ' ' + tr('坐标：odom。')
             bounds = (run.get('geometry', {}).get('map') or {}).get('record_bounds') or []
             if any(value is not None for value in bounds):
                 text += ' ' + tr('结果覆盖底图的有效录制片段。')
-            self.var_generation.set(text)
+            self._set_generation_status(text)
             return
         error = run.get('error')
         if not error:
@@ -1227,7 +1260,7 @@ class BagViewer(tk.Toplevel):
                 log.seek(max(0, os.fstat(log.fileno()).st_size - 2000))
                 lines = log.read().decode('utf-8', 'replace').strip().splitlines()
                 error = lines[-1] if lines else ''
-        self.var_generation.set(tr('语义地图生成失败：') + error + '\n' + self._semantic_log)
+        self._set_generation_status(tr('语义地图生成失败：') + error + '\n' + self._semantic_log)
 
     def _redraw_semantic(self):
         if self._last.get('semantic') and not self._last.get('err'):
@@ -1690,6 +1723,7 @@ class BagViewer(tk.Toplevel):
     def close(self):
         self._closing = True
         self.spinner.stop()
+        self.semantic_progress.stop()
         self._close_map_window()
         if self._export_pool:self._export_pool.shutdown(wait=False)
         for job in (self._load_job,self._drain_job,self._play_job,self._resize_job,self._export_poll_job,self._layout_job,self._semantic_poll_job):

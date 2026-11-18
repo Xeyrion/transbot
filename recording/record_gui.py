@@ -628,16 +628,17 @@ class App:
         # 留空就是纯时间戳 —— 名字是可选的，不该拦着人开录。
         row = tk.Frame(box, bg=CARD)
         row.pack(fill=tk.X, pady=(6, 0))
-        tk.Label(row, text=tr('会话名'), bg=CARD, fg=DIM).pack(side=tk.LEFT)
+        tk.Label(row, text=tr('录制名称'), bg=CARD, fg=DIM).pack(side=tk.LEFT)
         self.var_name = tk.StringVar(value='')
         name_entry = tk.Entry(row, textvariable=self.var_name, width=22)
         name_entry.pack(side=tk.LEFT, padx=6)
-        tk.Label(row, text=tr('可留空；留空就是纯时间戳'), bg=CARD, fg=DIM,
+        tk.Label(row, text=tr('点击开始时生效；可留空'), bg=CARD, fg=DIM,
                  font=('', 9)).pack(side=tk.LEFT)
         self.lbl_name = tk.Label(box, text='', bg=CARD, fg=DIM, anchor='w',
                                  font=('', 9))
         self.lbl_name.pack(fill=tk.X, pady=(2, 0))
         self.var_name.trace('w', lambda *a: self._preview_name())
+        self._preview_name()
 
         row = tk.Frame(box, bg=CARD)
         row.pack(fill=tk.X, pady=(10, 0))
@@ -1154,7 +1155,7 @@ class App:
         if not raw:
             self.lbl_name.configure(text=tr('目录名：session_<时间戳>'), fg=DIM)
         elif not label:
-            self.lbl_name.configure(text=tr('这个名字里没有可用字符，会退回纯时间戳'), fg=BAD)
+            self.lbl_name.configure(text=tr('名称无效，请修改或留空'), fg=BAD)
         else:
             self.lbl_name.configure(text=tr('目录名：session_<时间戳>_%s') % label, fg=DIM)
 

@@ -424,5 +424,12 @@
   "此结果使用里程计坐标（odom），位置可能随里程计累计漂移。": "This result uses odometry coordinates (odom); positions may drift with accumulated odometry error.",
   "本帧显示 %d 个其它类别框。": "Showing %d other detection boxes in this frame.",
   "本帧没有其它类别的检测框。": "No other classes detected in this frame.",
-  "选择语义回放结果后，可查看其它类别的检测框。": "Select a semantic replay result to view other detection boxes."
+  "选择语义回放结果后，可查看其它类别的检测框。": "Select a semantic replay result to view other detection boxes.",
+  "录制名称": "Recording name",
+  "点击开始时生效；可留空": "Applied on Start; optional",
+  "名称无效，请修改或留空": "Invalid name; edit it or leave it blank",
+  "语义生成说明": "About semantic generation",
+  "栅格底图可选；物品三维定位需要有效深度、相机内外参和机器人位姿。\n没有底图时使用 odom 坐标，位置可能随里程计累计漂移。\n生成时显示当前阶段和已用时间；动态进度条表示任务仍在运行，不代表完成百分比。\n结果保存在当前录制目录，可从“地图图库”或“更多 → 结果目录”打开。": "The occupancy grid is optional; 3D localization requires valid depth, camera intrinsics and extrinsics, and robot poses.\nWithout a base map, results use odom coordinates and may accumulate odometry drift.\nGeneration shows the current stage and elapsed time. The animated bar indicates activity, not a completion percentage.\nResults stay with the recording. Open Map gallery or More > Results to find them.",
+  "已用 %s": "Elapsed %s",
+  "坐标：odom。": "Coordinates: odom."
 }

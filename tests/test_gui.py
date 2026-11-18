@@ -185,9 +185,12 @@ while True:
             menu.invoke(1)
             launch.assert_called_once()
             self.assertTrue(v.generate_button.instate(['disabled']))
+            self.assertEqual(v.semantic_progress.winfo_manager(), 'pack')
+            self.assertIn(self.gui.tr('已用 %s') % '', v.var_generation.get())
             self.pump(lambda:v._semantic_proc is None)
+            self.assertFalse(v.semantic_progress.winfo_manager())
             self.assertEqual(v.semantic_picker.get(), self.gui.SEMANTIC_PRESETS['yolo26s-seg'])
-            self.assertIn(self.gui.tr('此结果使用里程计坐标（odom），位置可能随里程计累计漂移。'), v.var_generation.get())
+            self.assertIn(self.gui.tr('坐标：odom。'), v.var_generation.get())
             self.pump(lambda:v._last.get('semantic_run') == v._semantic_output)
         v.close()
 
@@ -281,6 +284,13 @@ while True:
         import record_gui
         with patch('record_gui.threading.Thread.start'):
             app=record_gui.App(self.root,record_gui.Remote('jetson@192.168.1.11','unused'))
+        self.assertIn('session_<', app.lbl_name.cget('text'))
+        with patch.object(app, '_run_script') as run:
+            app.var_name.set('实验室 1')
+            self.assertIn('实验室_1', app.lbl_name.cget('text'))
+            run.assert_not_called()
+            app.on_start()
+            self.assertEqual(run.call_args[0][0][-2:], ['-n', '实验室_1'])
         app.state=dict(rec=0,ros_ok=1,health_state='not_recording',rgb=30.,depth=29.,scan=7.5,
                        master=1,driver=1,disk_free_gb=23.)
         app.state_t=time.monotonic()
