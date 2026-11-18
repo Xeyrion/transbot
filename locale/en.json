@@ -417,5 +417,6 @@
   "正在准备生成": "Preparing generation",
   "%s 已生成，可在地图图库查看。": "%s complete. Open Map gallery to view it.",
   "结果覆盖底图的有效录制片段。": "Results cover the valid mapped interval.",
-  "%s 已生成，图库保存失败。可在更多菜单重试最终地图。": "%s complete. Gallery export failed. Retry Final map in More."
+  "%s 已生成，图库保存失败。可在更多菜单重试最终地图。": "%s complete. Gallery export failed. Retry Final map in More.",
+  "这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。": "This recording has no base map. Use Build / Rebuild Map in the Data Viewer first."
 }

@@ -9,7 +9,7 @@ import sys
 
 HERE=os.path.dirname(os.path.abspath(__file__))
 ROOT=os.path.dirname(HERE);sys.path.insert(0,ROOT)
-from semantic_replay import SemanticReplay,draw_detections
+from semantic_replay import SemanticReplay,draw_detections,replay_geometry
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
     sheet.save(os.path.join(parent,'depth_preview.png'))
     fig,axes=plt.subplots(2,4,figsize=(16,9))
     models={c:json.load(open(runs[c]['path']+'/objects.json')) for c in runs}
-    reference=json.load(open(runs['A0']['path']+'/run.json'));linked=reference['geometry']['map']
+    reference=json.load(open(runs['A0']['path']+'/run.json'));linked=replay_geometry(reference,runs['A0']['path'])
     info=yaml.safe_load(open(linked['yaml']));image_path=info['image']
     if not os.path.isabs(image_path):image_path=os.path.join(os.path.dirname(linked['yaml']),image_path)
     raster=np.asarray(Image.open(image_path));h,w=raster.shape;res=info['resolution'];ox,oy,yaw=info['origin']

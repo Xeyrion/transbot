@@ -10,7 +10,8 @@ import glob
 import hashlib
 import json
 import os
-from viewer_core import session_files, frame_metadata
+from viewer_core import session_files, frame_metadata, semantic_directory
+from semantic_presets import PRESET_ALIASES
 
 
 COLORS = {'fused': (74, 222, 128), 'depth': (56, 189, 248),
@@ -34,9 +35,13 @@ def validate_sources(run, bag_path):
             raise ValueError('Semantic source fingerprint changed: '+os.path.basename(p))
 
 
-def discover_runs(bag_path, root):
+def discover_runs(bag_path, root=None):
     """Cheap metadata-only discovery. Full validation happens when selected."""
     found = []
+    if root is None:
+        if not session_files(bag_path):
+            return []
+        root = semantic_directory(bag_path)
     for path in sorted(glob.glob(os.path.join(root, '*', 'run.json'))):
         try:
             run = read_json(path)
@@ -46,16 +51,37 @@ def discover_runs(bag_path, root):
             model = os.path.splitext(os.path.basename(run.get('model', {}).get('path') or 'model'))[0]
             title = run.get('display_label_en') if os.environ.get('BAGTOOLS_LANG','').startswith('en') else run.get('display_label')
             run_id = run.get('run_id', '')
-            preset = run.get('preset')
+            preset = PRESET_ALIASES.get(run.get('preset'), run.get('preset'))
             if not preset and model == 'yolo26s' and run_id.endswith('_coco_yolo26s'):
                 preset = 'yolo26s'
             if not preset and model == 'yolo26s-seg' and run_id.endswith('_B1'):
-                preset = 'b1'
+                preset = 'yolo26s-seg'
             found.append(dict(path=os.path.dirname(path), label=title or model+' | '+os.path.basename(os.path.dirname(path)),
                               preset=preset, mtime=os.path.getmtime(path)))
         except (IOError, OSError, ValueError, KeyError, TypeError):
             continue
     return found
+
+
+def replay_geometry(run, folder):
+    """Resolve an optional portable base map snapshot and verify its assets."""
+    linked = run.get('geometry', {}).get('map')
+    hashes = run.get('geometry_sha256', {})
+    snapshot = run.get('replay_map')
+    if snapshot:
+        linked = dict(linked)
+        linked['yaml'] = os.path.join(folder, snapshot['yaml'])
+        trajectory = snapshot.get('trajectory')
+        linked['trajectory'] = os.path.join(folder, trajectory) if trajectory else None
+        hashes = {os.path.join(folder, path): value for path, value in snapshot['sha256'].items()}
+    for path, expected in hashes.items():
+        digest = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for block in iter(lambda: f.read(1024*1024), b''):
+                digest.update(block)
+        if digest.hexdigest() != expected:
+            raise ValueError('Semantic geometry has changed: '+path)
+    return linked
 
 
 class SemanticReplay(object):
@@ -77,14 +103,7 @@ class SemanticReplay(object):
                 raise ValueError('Semantic sidecars use a different map or coordinate frame')
         if self.world == 'map' and not self.linked:
             raise ValueError('Semantic map provenance is missing')
-        # Review uses the original geometry bundle, even if a newer active map exists.
-        for path, expected in self.run.get('geometry_sha256', {}).items():
-            digest = hashlib.sha256()
-            with open(path, 'rb') as f:
-                for block in iter(lambda: f.read(1024*1024), b''):
-                    digest.update(block)
-            if digest.hexdigest() != expected:
-                raise ValueError('Semantic geometry has changed: '+path)
+        self.linked = replay_geometry(self.run, self.folder)
         self.objects = objects.get('objects', [])
         self.model = os.path.splitext(os.path.basename(self.run.get('model', {}).get('path') or 'model'))[0]
         self.classes = None
@@ -101,6 +120,8 @@ class SemanticReplay(object):
         self.detections = {}
         for raw in observations.get('detections', []):
             det = dict(raw)
+            if det.get('mask'):
+                det['mask'] = os.path.join(self.folder, det['mask'])
             oid = det.get('observation_id')
             det['included'] = self.classes is None or det['label'] in self.classes
             det['object_number'] = fused.get(oid)

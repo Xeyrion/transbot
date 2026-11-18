@@ -98,6 +98,7 @@ while True:
  print(json.dumps(out));sys.stdout.flush()
 ''' % (str(image), str(image)))
         self.gui.SERVER = str(server)
+        (self.folder/'unused.bag').touch()
         v = self.gui.BagViewer(self.root, str(self.folder), 'unused.bag')
         self.pump(lambda:not v._loading)
         self.assertEqual(tuple(v.semantic_picker['values'])[1:], ('YOLO26s',))
@@ -142,11 +143,12 @@ while True:
             v.open_results();opened.assert_called_once_with('/semantic/test')
         with patch.object(self.gui,'HERE',str(self.folder)),patch.object(v,'_open_path') as opened:
             v.open_gallery()
-            opened.assert_called_once_with(str(self.folder/'results'/'semantic_maps'/'unused'))
-        def export_saved(folder,**kwargs):
+            opened.assert_called_once_with(str(self.folder/'semantic'/'unused'/'gallery'))
+        def export_saved(folder,gallery):
             self.assertEqual(folder,'/semantic/test');time.sleep(.15)
+            self.assertEqual(gallery,str(self.folder/'semantic'/'unused'/'gallery'))
             return str(self.folder/'final_semantic_map.png')
-        with patch.object(self.gui,'export_final_map',side_effect=export_saved),patch.object(v,'_open_path') as opened:
+        with patch.object(self.gui,'export_recording_map',side_effect=export_saved),patch.object(v,'_open_path') as opened:
             start=time.monotonic();v.open_final_map();self.assertLess(time.monotonic()-start,.1)
             self.pump(lambda:opened.called)
             opened.assert_called_once_with(str(self.folder/'final_semantic_map.png'))
@@ -155,22 +157,27 @@ while True:
         self.assertEqual(v.world, 'base')
         self.assertEqual(v._export_rgb.getpixel((5, 20)), (0, 0, 0))
         def start_generation(command, **kwargs):
-            self.assertEqual(command[4:6], ['--preset', 'b1'])
-            self.assertEqual(command[-1], str(self.folder/'results'/'semantic_maps'))
+            self.assertEqual(command[4:], ['--preset', 'yolo26s-seg'])
             output = Path(command[3]);output.mkdir()
+            self.assertEqual(output.parent, self.folder/'semantic'/'unused')
             (output/'run.json').write_text('{"state":"complete"}')
-            scan.return_value = [dict(path=str(output), label='B1 result', preset='b1')]
+            scan.return_value = [dict(path=str(output), label='YOLO26s Segmentation result', preset='yolo26s-seg')]
             process = Mock()
             process.poll.side_effect = [None, 0]
             return process
         with patch.object(self.gui,'HERE',str(self.folder)), \
                 patch.object(self.gui,'discover_runs') as scan, \
-                patch.object(self.gui.subprocess,'Popen',side_effect=start_generation):
+                patch.object(self.gui.subprocess,'Popen',side_effect=start_generation) as launch:
             menu = v.nametowidget(str(v.generate_button['menu']))
+            menu.invoke(1)
+            launch.assert_not_called()
+            pointer = Path(self.gui.map_manifest_path(str(self.folder/'unused.bag')))
+            pointer.parent.mkdir(parents=True)
+            pointer.touch()
             menu.invoke(1)
             self.assertTrue(v.generate_button.instate(['disabled']))
             self.pump(lambda:v._semantic_proc is None)
-            self.assertEqual(v.semantic_picker.get(), 'B1')
+            self.assertEqual(v.semantic_picker.get(), self.gui.SEMANTIC_PRESETS['yolo26s-seg'])
             self.pump(lambda:v._last.get('semantic_run') == v._semantic_output)
         v.close()
 

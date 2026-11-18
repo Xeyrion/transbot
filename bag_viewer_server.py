@@ -229,7 +229,7 @@ def main():
     contexts = {None: (context, None)}
     last_semantic_key = last_semantic_out = None
     info = dict(context['info'])
-    info['semantic_runs'] = discover_runs(path, os.path.join(os.path.dirname(__file__), 'results', 'semantic'))
+    info['semantic_runs'] = discover_runs(path)
     if not send(info):
         bag.close()
         return

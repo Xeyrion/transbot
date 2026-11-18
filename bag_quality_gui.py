@@ -28,11 +28,13 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from session_catalog import sessions, bag_names, rename_target
 from semantic_replay import draw_detections, discover_runs, read_json, COLORS
-from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_final_map, gallery_recording
+from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_recording_map
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
+from semantic_presets import PRESETS
+from viewer_core import map_manifest_path, semantic_directory
 
 import tkinter as tk
-from i18n import tr
+from i18n import language, tr
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +42,7 @@ PROBE = os.path.join(HERE, 'bag_quality_probe.py')
 SERVER = os.path.join(HERE, 'bag_viewer_server.py')
 DEFAULT_DIR = os.path.expanduser('~/robot_research/bagtools/bags')
 PREVIEW = '/tmp/bag_quality_preview.ppm'
-SEMANTIC_PRESETS = {'yolo26s': 'YOLO26s', 'b1': 'B1'}
+SEMANTIC_PRESETS = {key: english if language() == 'en' else label for key, label, english, _, _ in PRESETS}
 
 BG = '#eef1f4'
 CARD = '#ffffff'
@@ -863,8 +865,8 @@ class BagViewer(tk.Toplevel):
         self.semantic_picker.bind('<<ComboboxSelected>>', self._select_semantic)
         self._controls.append(self.semantic_picker)
         self.generate_button, generate_menu = self._semantic_menu(semantic_bar, tr('生成语义地图'))
-        generate_menu.add_command(label=tr('YOLO26s · 检测框'), command=lambda: self._generate_semantic('yolo26s'))
-        generate_menu.add_command(label=tr('B1 · 分割深度'), command=lambda: self._generate_semantic('b1'))
+        for preset, title in SEMANTIC_PRESETS.items():
+            generate_menu.add_command(label=title, command=lambda key=preset: self._generate_semantic(key))
         gallery = ttk.Button(semantic_bar, text=tr('地图图库'), command=self.open_gallery)
         gallery.pack(side='left', padx=3)
         self._controls.append(gallery)
@@ -1050,18 +1052,7 @@ class BagViewer(tk.Toplevel):
         self._open_path(self._last.get('semantic_run') or self.folder)
 
     def open_gallery(self):
-        gallery = os.path.join(HERE, 'results', 'semantic_maps')
-        source = os.path.join(self.folder, self.bag)
-        run_folder = self._last.get('semantic_run')
-        if run_folder:
-            try:
-                with open(os.path.join(run_folder, 'run.json')) as f:
-                    sources = json.load(f).get('sources', [])
-            except (OSError, ValueError):
-                sources = []
-            if sources:
-                source = sources[0]['path']
-        path = os.path.join(gallery, gallery_recording(source))
+        path = os.path.join(semantic_directory(os.path.join(self.folder, self.bag)), 'gallery')
         os.makedirs(path, exist_ok=True)
         self._open_path(path)
 
@@ -1073,7 +1064,8 @@ class BagViewer(tk.Toplevel):
         if self._playing:self.toggle_play()
         if self._export_pool is None:self._export_pool=ThreadPoolExecutor(max_workers=1)
         self.var_info.set(tr('正在导出完整语义地图…'))
-        self._map_export_future=self._export_pool.submit(export_final_map,folder,gallery=os.path.join(HERE,'results','semantic_maps'))
+        gallery = os.path.join(semantic_directory(os.path.join(self.folder, self.bag)), 'gallery')
+        self._map_export_future = self._export_pool.submit(export_recording_map, folder, gallery)
         self._poll_final_map()
 
     def _poll_final_map(self):
@@ -1141,7 +1133,7 @@ class BagViewer(tk.Toplevel):
 
     def _load_semantic(self):
         folder = filedialog.askdirectory(parent=self, title=tr('选择包含 run.json 的语义结果文件夹'),
-                                         initialdir=os.path.join(HERE, 'results', 'semantic'))
+                                         initialdir=semantic_directory(os.path.join(self.folder, self.bag)))
         if not folder:
             return
         if all(run['path'] != folder for run in self._semantic_runs):
@@ -1152,19 +1144,22 @@ class BagViewer(tk.Toplevel):
         if self._semantic_proc is not None:
             return
         title = SEMANTIC_PRESETS[preset]
-        results = os.path.join(HERE, 'results', 'semantic')
-        gallery = os.path.join(HERE, 'results', 'semantic_maps')
         bag = os.path.join(self.folder, self.bag)
         try:
-            os.makedirs(results, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=results, prefix=preset+'_', suffix='.log', delete=False) as log:
+            if not os.path.isfile(map_manifest_path(bag)):
+                self.var_generation.set(tr('这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。'))
+                return
+            results = semantic_directory(bag)
+            logs = os.path.join(results, 'logs')
+            os.makedirs(logs, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=logs, prefix=preset+'_', suffix='.log', delete=False) as log:
                 self._semantic_log = log.name
-                self._semantic_output = os.path.splitext(log.name)[0]
+                self._semantic_output = os.path.join(results, os.path.splitext(os.path.basename(log.name))[0])
                 command = ['bash', os.path.join(HERE, 'semantic', 'run_semantic.sh'), bag,
-                           self._semantic_output, '--preset', preset, '--gallery', gallery]
+                           self._semantic_output, '--preset', preset]
                 self._semantic_proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
                                                        stderr=subprocess.STDOUT, start_new_session=True)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self.var_generation.set(tr('语义地图生成失败：') + str(exc))
             return
         self.generate_button.state(['disabled'])
@@ -1178,7 +1173,7 @@ class BagViewer(tk.Toplevel):
             run = {}
         code = self._semantic_proc.poll()
         if code is None:
-            labels = {'map': tr('正在建立底图'), 'sample': tr('正在配对与抽帧'),
+            labels = {'sample': tr('正在配对与抽帧'),
                       'detect': tr('正在识别'), 'fuse_render': tr('正在融合并保存')}
             stages = run.get('stages', [])
             stage = stages[-1]['name'] if stages else None
@@ -1188,7 +1183,7 @@ class BagViewer(tk.Toplevel):
         self._semantic_proc = None
         self.generate_button.state(['!disabled'])
         if code == 0 and run.get('state') == 'complete':
-            discovered = discover_runs(bag, os.path.join(HERE, 'results', 'semantic'))
+            discovered = discover_runs(bag)
             known = {result['path']: result for result in self._semantic_runs}
             known.update((result['path'], result) for result in discovered)
             self._semantic_runs = list(known.values())

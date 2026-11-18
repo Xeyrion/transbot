@@ -2,7 +2,6 @@
 """One isolated, traceable offline run; never silently reuse old frame output."""
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import shutil
@@ -14,28 +13,21 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-from viewer_core import association, session_files
+from viewer_core import association, session_files, semantic_directory
+from semantic_presets import PRESETS, PRESET_ALIASES
+from semantic_storage import digest, snapshot_map
 
 
-PRESETS = {
-    'yolo26s': ('YOLO26s', 'yolo26s.pt', 'center'),
-    'b1': ('B1', 'yolo26s-seg.pt', 'mask-surface'),
-}
-
-
-def digest(path):
-    h = hashlib.sha256()
-    with open(path, 'rb') as f:
-        for chunk in iter(lambda: f.read(1048576), b''): h.update(chunk)
-    return h.hexdigest()
+PROFILES = {key: (title, english, weights, projection) for key, title, english, weights, projection in PRESETS}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('bag'); ap.add_argument('out', nargs='?')
-    ap.add_argument('--preset', choices=sorted(PRESETS))
-    ap.add_argument('--gallery', help='Export the finished PNG into this map gallery')
+    ap.add_argument('--preset', choices=sorted(set(PROFILES) | set(PRESET_ALIASES)))
+    ap.add_argument('--gallery', help='Override the recording-local PNG gallery with a shared export root')
     args = ap.parse_args()
+    args.preset = PRESET_ALIASES.get(args.preset, args.preset)
     sources = session_files(os.path.abspath(args.bag))
     if not sources: ap.error('No bag sources found')
     if args.preset and any(glob_name.endswith('.bag.active') for glob_name in os.listdir(os.path.dirname(sources[0]))):
@@ -46,7 +38,7 @@ def main():
         out = os.path.abspath(args.out)
         os.makedirs(out)  # Refuse pre-existing output, including an empty directory.
     else:
-        parent = os.environ.get('BAGTOOLS_RESULTS_DIR', os.path.join(ROOT, 'results', 'semantic'))
+        parent = os.environ.get('BAGTOOLS_RESULTS_DIR', semantic_directory(sources[0]))
         os.makedirs(parent, exist_ok=True)
         out = tempfile.mkdtemp(prefix=datetime.datetime.utcnow().strftime('run_%Y%m%d_%H%M%S_'), dir=parent)
     manifest = dict(schema_version=2, run_id=os.path.basename(out), state='running',
@@ -71,8 +63,8 @@ def main():
     try:
         settings = dict(os.environ)
         if args.preset:
-            title, weights_name, projection = PRESETS[args.preset]
-            manifest.update(preset=args.preset, display_label=title, display_label_en=title)
+            title, english, weights_name, projection = PROFILES[args.preset]
+            manifest.update(preset=args.preset, display_label=title, display_label_en=english)
             settings.update(BACKEND='yolo26', SEMANTIC_WEIGHTS=os.path.join(ROOT, 'models', weights_name),
                             PROJECTION=projection, CONF='0.35', STEP='1', MAX_PAIR_MS='33', WORLD_FRAME='map',
                             RADIUS='0.6', MIN_HITS='3', ASSOCIATION='point', MIN_DURATION='0',
@@ -92,7 +84,7 @@ def main():
                 ['~/miniconda3/envs/yolo/bin/python', '~/miniconda3/bin/python']]
             python = next((p for p in candidates if os.path.isfile(p)), None)
             if not python: raise ValueError('YOLO environment missing; explicitly select BACKEND=cv2 to use Darknet')
-            weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(ROOT,'yolo26n.pt'))))
+            weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(ROOT,'models','yolo26s.pt'))))
             if not os.path.isfile(weights): raise ValueError('Local weights missing: '+weights)
             clean_env['SEMANTIC_WEIGHTS'] = weights
             manifest['model'] = dict(backend=backend, path=weights, sha256=digest(weights), python=python)
@@ -104,13 +96,17 @@ def main():
                 files={n:digest(os.path.join(models,n)) for n in ['yolov3-tiny.cfg','yolov3-tiny.weights','coco.names']})
         else:
             raise ValueError('Unsupported backend: '+backend)
-        if args.preset and not association(sources[0]):
-            from mapping_job import new_job, read_status
-            job = new_job(sources[0])
-            try:
-                run('map', [sys.executable, os.path.join(ROOT, 'mapping_job.py'), sources[0], '--job', str(job)])
-            except subprocess.CalledProcessError:
-                raise RuntimeError(read_status(job).get('error', 'Base map failed. See '+str(job)))
+        linked = association(sources[0], manifest=settings.get('MAP_ASSOCIATION'))
+        if args.preset and not linked:
+            raise ValueError('Build the base map for this recording before generating semantic objects.')
+        if linked:
+            snapshot = snapshot_map(out, linked)
+            manifest['replay_map'] = snapshot
+            snapshot_association = os.path.join(out, 'base_map_association.json')
+            snapshot_link = dict(linked, yaml=snapshot['yaml'], trajectory=snapshot['trajectory'])
+            with open(snapshot_association, 'w') as f:
+                json.dump(snapshot_link, f, indent=2)
+            settings['MAP_ASSOCIATION'] = snapshot_association
         extract = ['python2', os.path.join(HERE,'extract_frames.py'), sources[0], out,
             '--step', settings.get('STEP','1'), '--max-pair-ms', settings.get('MAX_PAIR_MS','33')]
         extract += ['--all'] if args.preset else ['--max', settings.get('MAX_FRAMES', '120')]
@@ -153,11 +149,14 @@ def main():
         if any(os.path.getsize(s['path'])!=s['size'] or os.path.getmtime(s['path'])!=s['mtime'] for s in manifest['sources']):
             raise ValueError('Source bags changed during analysis')
         manifest['state'] = 'complete'; save()
-        if args.gallery:
-            from map_display import export_final_map, gallery_image_path
+        if args.gallery or args.preset:
+            from map_display import export_final_map, gallery_image_path, export_recording_map
             try:
-                export_final_map(out, gallery=args.gallery)
-                manifest['gallery_image'] = os.path.join(os.path.abspath(args.gallery), gallery_image_path(manifest, out))
+                if args.gallery:
+                    export_final_map(out, gallery=args.gallery)
+                    manifest['gallery_image'] = os.path.join(os.path.abspath(args.gallery), gallery_image_path(manifest, out))
+                else:
+                    manifest['gallery_image'] = export_recording_map(out, os.path.join(semantic_directory(sources[0]), 'gallery'))
             except (OSError, ValueError) as exc:
                 manifest['gallery_error'] = str(exc)
                 print('Gallery export failed: ' + str(exc), file=sys.stderr)

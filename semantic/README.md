@@ -1,6 +1,6 @@
 # 离线语义地图
 
-正式入口：`bash semantic/run_semantic.sh <bag>`。使用同次录制的全部分卷，结果写入 `results/semantic/run_…/`，保留模型、来源、时间配对与几何信息。
+正式入口：`bash semantic/run_semantic.sh <bag>`。使用同次录制的全部分卷，结果写入 `<录制文件夹>/semantic/<bag 主干>/run_…/`，保留模型、来源、时间配对与几何信息。
 
 当前地图来自该会话的 `maps/<录制名>/association.json`。先在数据阅读中建图，再运行语义流程；没有当前地图时使用 odom 坐标，不加载散落旧图或旧 AMCL 的 map 坐标。
 

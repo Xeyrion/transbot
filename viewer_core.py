@@ -89,12 +89,22 @@ def session_files(path):
     return files or ([path] if os.path.isfile(path) else [])
 
 
-def map_directory(path):
+def _recording_location(path):
     files=session_files(path)
     if not files:raise ValueError('No source bags')
     stem=os.path.splitext(os.path.basename(files[0]))[0]
     if re.match(r'^.*_\d{8}_\d{6}_\d+$',stem):stem=re.sub(r'_\d+$','',stem)
-    return os.path.join(os.path.dirname(files[0]),'maps',stem)
+    return os.path.dirname(files[0]), stem
+
+
+def map_directory(path):
+    parent, stem = _recording_location(path)
+    return os.path.join(parent, 'maps', stem)
+
+
+def semantic_directory(path):
+    parent, stem = _recording_location(path)
+    return os.path.join(parent, 'semantic', stem)
 
 
 def map_manifest_path(path):

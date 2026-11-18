@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from semantic_replay import SemanticReplay, discover_runs, draw_detections, label_size, COLORS
+from viewer_core import semantic_directory
 
 
 class SemanticReplayTests(unittest.TestCase):
@@ -78,6 +79,18 @@ class SemanticReplayTests(unittest.TestCase):
         self.bags[1].unlink()
         with self.assertRaisesRegex(ValueError, 'different or incomplete'):
             self.load()
+
+    def test_recording_local_discovery_and_legacy_preset(self):
+        self.run.update(preset='b1')
+        self.write('run.json', self.run)
+        target = Path(semantic_directory(str(self.bags[1]))) / self.folder.name
+        target.parent.mkdir(parents=True)
+        self.folder.rename(target)
+        self.assertEqual(discover_runs(str(self.bags[0]))[0]['preset'], 'yolo26s-seg')
+        self.assertEqual(discover_runs(str(self.bags[1]))[0]['path'], str(target))
+        other = self.root/'different.bag'
+        other.write_bytes(b'fixture')
+        self.assertEqual(discover_runs(str(other)), [])
 
     def test_failed_run_geometry_mismatch_missing_sample(self):
         self.run['state'] = 'failed';self.write('run.json', self.run)

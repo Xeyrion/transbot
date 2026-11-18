@@ -1,5 +1,4 @@
 """Shared world-to-pixel geometry and standalone full-session semantic maps."""
-import hashlib
 import json
 import math
 import os
@@ -8,6 +7,7 @@ import shutil
 from PIL import Image, ImageDraw, ImageFont
 from session_catalog import STAMP_PREFIX, session_label
 from viewer_core import frame_metadata
+from semantic_replay import replay_geometry
 
 
 class Viewport:
@@ -133,24 +133,15 @@ def export_final_map(folder,destination=None,size=(2400,1600),gallery=None):
     points=path+[(o['x'],o['y']) for o in objects]
     width,height=size;head,foot=94,76
     view=Viewport.fit(point_bounds(points),width-40,height-head-foot,margin=1.25)
-    info=run.get('geometry',{}).get('map') if world=='map' else None
+    info=replay_geometry(run,folder) if world=='map' else None
     if world=='map' and not info:raise ValueError('Map geometry is missing')
     if data.get('geometry',{}).get('map')!=run.get('geometry',{}).get('map'):
         raise ValueError('Object and background map provenance differ')
     if info:
         import yaml
-        def verify(path):
-            expected=run.get('geometry_sha256',{}).get(path)
-            if expected:
-                digest=hashlib.sha256()
-                with open(path,'rb') as f:
-                    for block in iter(lambda:f.read(1048576),b''):digest.update(block)
-                if digest.hexdigest()!=expected:raise ValueError('Map geometry changed: '+path)
-        verify(info['yaml'])
         with open(info['yaml']) as f:grid=yaml.safe_load(f)
         image_path=grid['image']
         if not os.path.isabs(image_path):image_path=os.path.join(os.path.dirname(info['yaml']),image_path)
-        verify(image_path)
         grid['image']=image_path
         panel=raster_view(load_grid(grid),grid,view)
     else:panel=Image.new('RGB',(view.width,view.height),(235,239,243))
@@ -175,3 +166,11 @@ def export_final_map(folder,destination=None,size=(2400,1600),gallery=None):
         os.makedirs(os.path.dirname(gallery_image), exist_ok=True)
         shutil.copy2(destination, gallery_image)
     return os.path.abspath(destination)
+
+
+def export_recording_map(folder, gallery):
+    path = export_final_map(folder)
+    with open(os.path.join(folder, 'run.json')) as f:
+        run = json.load(f)
+    os.makedirs(gallery, exist_ok=True)
+    return shutil.copy2(path, os.path.join(gallery, gallery_filename(run, folder)))

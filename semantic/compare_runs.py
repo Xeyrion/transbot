@@ -7,7 +7,6 @@ Each completed variant is a normal viewer-compatible run. No active map changes.
 import argparse
 import copy
 import datetime
-import glob
 import hashlib
 import json
 import os
@@ -20,7 +19,9 @@ from collections import Counter
 HERE=os.path.dirname(os.path.abspath(__file__))
 ROOT=os.path.dirname(HERE)
 sys.path.insert(0,ROOT)
-from semantic_replay import validate_sources
+from semantic_replay import replay_geometry, validate_sources
+from semantic_storage import snapshot_map
+from viewer_core import frame_metadata, semantic_directory
 from run_pipeline import digest
 
 
@@ -34,7 +35,7 @@ def link_samples(source,out):
     for name in ('sampling.json','calibration.json'):
         if os.path.isfile(os.path.join(source,name)):shutil.copy2(os.path.join(source,name),out)
     identity=hashlib.sha256()
-    for folder in sorted(glob.glob(os.path.join(source,'[0-9][0-9][0-9][0-9]'))):
+    for folder in map(os.path.dirname, frame_metadata(source)):
         dest=os.path.join(out,os.path.basename(folder));os.mkdir(dest)
         for name in ('meta.json','rgb.png','depth.npy'):
             path=os.path.join(folder,name);target=os.path.join(dest,name)
@@ -47,7 +48,7 @@ def link_samples(source,out):
 def legacy_predictions(baseline,out):
     data=json.load(open(os.path.join(baseline,'observations.json')))
     frames={}
-    for folder in sorted(glob.glob(os.path.join(baseline,'[0-9][0-9][0-9][0-9]'))):
+    for folder in map(os.path.dirname, frame_metadata(baseline)):
         meta=json.load(open(os.path.join(folder,'meta.json')))
         frames[os.path.basename(folder)]=dict(rgb_sha256=digest(os.path.join(folder,'rgb.png')),
             rgb_record=meta['rgb_record'],detections=[])
@@ -81,7 +82,9 @@ def main():
     baseline=os.path.abspath(args.baseline);base=json.load(open(os.path.join(baseline,'run.json')))
     if base['state']!='complete':raise ValueError('Baseline run is not complete')
     validate_sources(base,base['sources'][0]['path'])
-    suite=os.path.join(ROOT,'results','semantic_comparisons',args.suite);os.makedirs(suite)
+    recording = semantic_directory(base['sources'][0]['path'])
+    linked = replay_geometry(base, baseline)
+    suite=os.path.join(recording,'comparisons',args.suite);os.makedirs(suite)
     python=base['model']['python'];seg=os.path.abspath(args.seg_weights)
     if not os.path.isfile(seg):raise ValueError('Segmentation weights missing: '+seg)
     clean=dict(os.environ);clean.pop('PYTHONPATH',None);clean.pop('PYTHONHOME',None)
@@ -94,8 +97,11 @@ def main():
 
     def variant(code,label,label_en,source,projection,predictions=None,seg_model=False,
                 radius=.6,view=False,observations_from=None,association='point'):
-        out=os.path.join(ROOT,'results','semantic',args.suite+'_'+code);os.mkdir(out)
+        out=os.path.join(recording,args.suite+'_'+code);os.mkdir(out)
         run=copy.deepcopy(base)
+        run.pop('preset', None)
+        run.pop('gallery_image', None)
+        run.pop('gallery_error', None)
         run.update(run_id=os.path.basename(out),state='running',stages=[],display_label=code+' '+label,
                    display_label_en=code+' '+label_en,parent_run=baseline,
                    experiment=dict(suite=args.suite,projection=projection,radius=radius,view_gate=view,association=association),
@@ -103,6 +109,8 @@ def main():
                        ('compare_runs.py','depth_projection.py','detect_project.py','cluster_objects.py')})
         if seg_model:
             run['model']=dict(backend='yolo26',path=seg,sha256=digest(seg),python=python)
+        if linked:
+            run['replay_map'] = snapshot_map(out, linked)
         path=os.path.join(out,'run.json');save(path,run)
         print('START '+code+' '+label_en,flush=True)
 
@@ -128,7 +136,7 @@ def main():
                 stage('detect',cmd,env)
             cmd=[sys.executable,os.path.join(HERE,'cluster_objects.py'),out,'--radius',str(radius),'--min-hits','3','--classes',classes]
             cmd+=['--association',association]
-            if run['world_frame']=='map':cmd+=['--map',run['geometry']['map']['yaml']]
+            if run['world_frame']=='map':cmd+=['--map',os.path.join(out, run['replay_map']['yaml'])]
             if view:cmd+=['--min-duration','1','--min-view-baseline','.15','--min-view-angle','8']
             stage('fuse_render',cmd)
             validate_sources(run,base['sources'][0]['path'])
@@ -150,9 +158,22 @@ def main():
         if not args.no_dense:
             dense=os.path.join(suite,'samples_3hz')
             command=list(next(s['command'] for s in base['stages'] if s['name']=='sample'))
-            command[3]=dense
+            command[2:4]=[base['sources'][0]['path'],dense]
+            if linked:
+                map_manifest = os.path.join(suite, 'base_map_association.json')
+                save(map_manifest, linked)
+                if '--map-association' in command:
+                    command[command.index('--map-association')+1]=map_manifest
+                else:
+                    command += ['--map-association', map_manifest]
+            if '--calibration' in command:
+                command[command.index('--calibration')+1]=os.path.join(baseline,'calibration.json')
             command[command.index('--step')+1]=str(1./3)
-            command[command.index('--max')+1]='1000'
+            if '--all' in command:
+                command.remove('--all')
+                command += ['--max', '1000']
+            else:
+                command[command.index('--max')+1]='1000'
             with open(os.path.join(suite,'sample_3hz.log'),'w') as log:
                 subprocess.run(command,check=True,stdout=log,stderr=subprocess.STDOUT)
             # Frames outside the original complete recording are never added.

@@ -78,7 +78,7 @@ class MapDisplayTests(unittest.TestCase):
             run=dict(state='complete',world_frame='map',geometry=geometry,geometry_sha256={yaml_path:'0'*64})
             (root/'run.json').write_text(json.dumps(run))
             (root/'objects.json').write_text(json.dumps(dict(world_frame='map',geometry=geometry,objects=[])))
-            with self.assertRaisesRegex(ValueError,'Map geometry changed'):export_final_map(str(root))
+            with self.assertRaisesRegex(ValueError,'geometry has changed'):export_final_map(str(root))
 
 
 if __name__=='__main__':unittest.main()

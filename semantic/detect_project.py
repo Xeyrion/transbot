@@ -5,8 +5,8 @@
     python3 detect_project.py <frames_dir> [--backend yolo26|cv2] [--conf 0.25]
 
 两个后端：
-  yolo26  Ultralytics YOLO26（默认 yolo26n.pt，端到端无 NMS，CPU 上比 yolo11n 快
-          最多 43%）。需要 python>=3.8 和 torch —— 控制机上用的是
+  yolo26  Ultralytics YOLO26（默认 models/yolo26s.pt）。需要 python>=3.8 和 torch。
+          控制机上用的是
           ~/miniconda3/envs/yolo/bin/python，不动系统 python3.6。
   cv2     原来的 OpenCV dnn + YOLOv3-tiny，只要 cv2，任何 python3 都能跑，
           当兜底用。
@@ -76,8 +76,7 @@ class Ultralytics(object):
 
     def __init__(self, conf):
         from ultralytics import YOLO
-        weights = os.path.abspath(os.environ.get('SEMANTIC_WEIGHTS',
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'yolo26n.pt')))
+        weights = os.path.abspath(os.environ.get('SEMANTIC_WEIGHTS', os.path.join(MODELS, 'yolo26s.pt')))
         if not os.path.isfile(weights):
             raise ValueError('Local model weights are missing: ' + weights)
         self.model = YOLO(weights)
@@ -169,12 +168,15 @@ def main():
             raw=dict(raw);mask=raw.pop('_mask',None)
             if mask is not None:
                 mask_dir=os.path.join(args.frames_dir,'masks');os.makedirs(mask_dir,exist_ok=True)
-                raw['mask']=os.path.join(mask_dir,'%s_%03d.png'%(frame_id,index))
-                Image.fromarray(mask.astype(np.uint8)*255).save(raw['mask'])
-                raw['mask_sha256']=sha256(raw['mask'])
+                raw['mask']=os.path.join('masks','%s_%03d.png'%(frame_id,index))
+                mask_path=os.path.join(args.frames_dir,raw['mask'])
+                Image.fromarray(mask.astype(np.uint8)*255).save(mask_path)
+                raw['mask_sha256']=sha256(mask_path)
             elif raw.get('mask'):
-                if sha256(raw['mask'])!=raw['mask_sha256']:raise ValueError('Cached instance mask changed')
-                mask=np.asarray(Image.open(raw['mask']).convert('L'))>0
+                mask_path=os.path.abspath(os.path.join(os.path.dirname(args.predictions),raw['mask']))
+                if sha256(mask_path)!=raw['mask_sha256']:raise ValueError('Cached instance mask changed')
+                mask=np.asarray(Image.open(mask_path).convert('L'))>0
+                raw['mask']=os.path.relpath(mask_path,args.frames_dir)
             saved_detections.append(raw)
             label,score=raw['label'],raw['score']
             if score < args.conf:
