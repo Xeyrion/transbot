@@ -418,6 +418,10 @@
   "%s 已生成，可在地图图库查看。": "%s complete. Open Map gallery to view it.",
   "结果覆盖底图的有效录制片段。": "Results cover the valid mapped interval.",
   "%s 已生成，图库保存失败。可在更多菜单重试最终地图。": "%s complete. Gallery export failed. Retry Final map in More.",
-  "这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。": "This recording has no base map. Use Build / Rebuild Map in the Data Viewer first.",
-  "选择录制": "Select recording"
+  "选择录制": "Select recording",
+  "显示其它识别类别": "Show other detections",
+  "此结果使用里程计坐标。": "This result uses odometry coordinates.",
+  "本帧显示 %d 个其它类别框。": "Showing %d other detection boxes in this frame.",
+  "本帧没有其它类别的检测框。": "No other classes detected in this frame.",
+  "选择语义回放结果后，可查看其它类别的检测框。": "Select a semantic replay result to view other detection boxes."
 }

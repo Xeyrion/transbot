@@ -2,7 +2,7 @@
 
 正式入口：`bash semantic/run_semantic.sh <bag>`。使用同次录制的全部分卷，结果写入 `<录制文件夹>/semantic/<bag 主干>/run_…/`，保留模型、来源、时间配对与几何信息。
 
-当前地图来自该会话的 `maps/<录制名>/association.json`。先在数据阅读中建图，再运行语义流程；没有当前地图时使用 odom 坐标，不加载散落旧图或旧 AMCL 的 map 坐标。
+当前地图来自该会话的 `maps/<录制名>/association.json`。建图和语义生成可以分别运行。没有当前地图时使用里程计坐标（odom），最终图显示轨迹和物品点。
 
 ```bash
 STEP=1 MAX_FRAMES=120 bash semantic/run_semantic.sh bags/<会话>/<首卷>.bag

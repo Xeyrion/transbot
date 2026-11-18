@@ -31,7 +31,7 @@ from semantic_replay import draw_detections, discover_runs, read_json, COLORS
 from map_display import Viewport, point_bounds, grid_bounds, draw_objects, export_recording_map
 from mapping_job import recording_groups, map_artifacts, new_job, read_status
 from semantic_presets import PRESETS
-from viewer_core import map_manifest_path, semantic_directory
+from viewer_core import semantic_directory
 
 import tkinter as tk
 from i18n import language, tr
@@ -504,9 +504,6 @@ class App(object):
             bag = self._selected_recording(title)
             if bag is None:
                 return
-            if not os.path.isfile(map_manifest_path(bag)):
-                messagebox.showinfo(title, tr('这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。'), parent=self.root)
-                return
             folder, name = os.path.split(bag)
             BagViewer(self.root, folder, name, preset=preset)
         except (OSError, ValueError) as exc:
@@ -902,9 +899,10 @@ class BagViewer(tk.Toplevel):
         self.var_boxes = tk.BooleanVar(value=True)
         self.var_points = tk.BooleanVar(value=True)
         self.var_other_classes = tk.BooleanVar(value=False)
-        for label, var in ((tr('识别框'), self.var_boxes), (tr('物品点'), self.var_points),
-                           (tr('全部类别'), self.var_other_classes)):
+        for label, var in ((tr('识别框'), self.var_boxes), (tr('物品点'), self.var_points)):
             view_menu.add_checkbutton(label=label, variable=var, command=self._redraw_semantic)
+        view_menu.add_checkbutton(label=tr('显示其它识别类别'), variable=self.var_other_classes,
+                                  command=self._toggle_other_classes)
         view_menu.add_separator()
         for label, command in ((tr('均衡布局'), lambda: self.set_layout('balanced')),
                                (tr('画面优先'), lambda: self.set_layout('rgb')),
@@ -1173,9 +1171,6 @@ class BagViewer(tk.Toplevel):
         title = SEMANTIC_PRESETS[preset]
         bag = os.path.join(self.folder, self.bag)
         try:
-            if not os.path.isfile(map_manifest_path(bag)):
-                self.var_generation.set(tr('这次录制还没有底图，请先在数据阅读主窗口点击「建图 / 重新建图」。'))
-                return
             results = semantic_directory(bag)
             logs = os.path.join(results, 'logs')
             os.makedirs(logs, exist_ok=True)
@@ -1219,6 +1214,8 @@ class BagViewer(tk.Toplevel):
                 text = tr('%s 已生成，图库保存失败。可在更多菜单重试最终地图。') % title
             else:
                 text = tr('%s 已生成，可在地图图库查看。') % title
+            if run.get('world_frame') == 'odom':
+                text += ' ' + tr('此结果使用里程计坐标。')
             bounds = (run.get('geometry', {}).get('map') or {}).get('record_bounds') or []
             if any(value is not None for value in bounds):
                 text += ' ' + tr('结果覆盖底图的有效录制片段。')
@@ -1235,6 +1232,28 @@ class BagViewer(tk.Toplevel):
     def _redraw_semantic(self):
         if self._last.get('semantic') and not self._last.get('err'):
             self._apply(self._last)
+
+    def _toggle_other_classes(self):
+        if self.var_other_classes.get():
+            self.var_boxes.set(True)
+        if self._last.get('semantic'):
+            self._redraw_semantic()
+        else:
+            self._update_semantic_note(None)
+
+    def _update_semantic_note(self, semantic):
+        note = ''
+        if semantic and not semantic.get('sample'):
+            note = tr('此处没有临近语义采样帧；拖动时间轴查看其他位置。')
+        elif semantic:
+            note = tr('模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。')
+            if self.var_other_classes.get() and self.var_boxes.get():
+                extras = sum(not d.get('included', True) for d in semantic['detections'])
+                details = tr('本帧显示 %d 个其它类别框。') % extras if extras else tr('本帧没有其它类别的检测框。')
+                note = details + '  ' + note
+        elif self.var_other_classes.get():
+            note = tr('选择语义回放结果后，可查看其它类别的检测框。')
+        self.var_semantic_note.set(note)
 
     def _on_slide(self, _v):
         """拖动中：只更新文字，最多每 150 ms 真的读一帧。
@@ -1376,12 +1395,7 @@ class BagViewer(tk.Toplevel):
             self._last=d  # Playback within one cached sample needs no image/font work.
             return
         self._last = d
-        if semantic:
-            self.var_semantic_note.set(tr('模型推理框（非人工标注）：绿已融合、蓝待融合、橙深度不足、灰排除。地图：绿为本帧关联、蓝为其他候选；全会话融合，非物体中心。'))
-            if not semantic.get('sample'):
-                self.var_semantic_note.set(tr('此处没有临近语义采样帧；拖动时间轴查看其他位置。'))
-        else:
-            self.var_semantic_note.set('')
+        self._update_semantic_note(semantic)
         self.lbl_scan_title.configure(text={
             'map': tr('地图 · 当前绿 / 历史灰'),
             'odom': tr('里程计 · 当前绿 / 历史灰'),

@@ -67,7 +67,7 @@ def main():
             title, english, weights_name, projection = PROFILES[args.preset]
             manifest.update(preset=args.preset, display_label=title, display_label_en=english)
             settings.update(BACKEND='yolo26', SEMANTIC_WEIGHTS=os.path.join(ROOT, 'models', weights_name),
-                            PROJECTION=projection, CONF='0.35', STEP='1', MAX_PAIR_MS='33', WORLD_FRAME='map',
+                            PROJECTION=projection, CONF='0.35', STEP='1', MAX_PAIR_MS='33',
                             RADIUS='0.6', MIN_HITS='3', ASSOCIATION='point', MIN_DURATION='0',
                             MIN_VIEW_BASELINE='0', MIN_VIEW_ANGLE='0',
                             CLASSES='chair,dining table,laptop,tv,keyboard,mouse,bench')
@@ -99,8 +99,8 @@ def main():
             raise ValueError('Unsupported backend: '+backend)
         base_manifest = settings.get('MAP_ASSOCIATION')
         linked = association(sources[0], manifest=base_manifest)
-        if args.preset and not linked:
-            raise ValueError('Build the base map for this recording before generating semantic objects.')
+        if args.preset:
+            settings['WORLD_FRAME'] = 'map' if linked else 'odom'
         if linked:
             snapshot = snapshot_map(out, linked)
             if association(sources[0], manifest=base_manifest) != linked:

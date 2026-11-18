@@ -92,7 +92,8 @@ while True:
   out['context']=context if selected else dict(dur=5,t0=100,world='base',has_map=False)
  if selected:
   out['semantic']=dict(model='yolo26s',sample='0000',world='map',detections=[
-    dict(label='chair',score=.9,bbox_xywh=[5,20,20,20],status='fused',projection='accepted',object_number=1,included=True)],
+    dict(label='chair',score=.9,bbox_xywh=[5,20,20,20],status='fused',projection='accepted',object_number=1,included=True),
+    dict(label='backpack',score=.8,bbox_xywh=[55,40,20,20],status='excluded',projection='accepted',included=False)],
     objects=[dict(label='chair',number=1,x=1,y=1)])
  previous=selected
  print(json.dumps(out));sys.stdout.flush()
@@ -110,6 +111,18 @@ while True:
         self.assertEqual(v.world, 'map')
         self.assertEqual(v._export_rgb.getpixel((5, 20)), self.gui.COLORS['fused'])
         self.assertIsNotNone(v._map_panel)
+        self.assertEqual(v._export_rgb.getpixel((55, 55)), (0, 0, 0))
+        v.var_boxes.set(False)
+        v.var_other_classes.set(True)
+        v._toggle_other_classes()
+        self.assertTrue(v.var_boxes.get())
+        self.assertEqual(v._export_rgb.getpixel((55, 55)), self.gui.COLORS['excluded'])
+        self.assertIn(self.gui.tr('本帧显示 %d 个其它类别框。') % 1, v.var_semantic_note.get())
+        v._update_semantic_note(dict(v._last['semantic'], detections=[]))
+        self.assertIn(self.gui.tr('本帧没有其它类别的检测框。'), v.var_semantic_note.get())
+        v.var_other_classes.set(False)
+        v._toggle_other_classes()
+        self.assertEqual(v._export_rgb.getpixel((55, 55)), (0, 0, 0))
         with patch.object(self.gui,'draw_detections',wraps=self.gui.draw_detections) as draw:
             v._apply(dict(v._last))
             draw.assert_not_called()  # Same semantic sample while the timeline advances.
@@ -160,7 +173,7 @@ while True:
             self.assertEqual(command[4:], ['--preset', 'yolo26s-seg'])
             output = Path(command[3]);output.mkdir()
             self.assertEqual(output.parent, self.folder/'semantic'/'unused')
-            (output/'run.json').write_text('{"state":"complete"}')
+            (output/'run.json').write_text('{"state":"complete","world_frame":"odom"}')
             scan.return_value = [dict(path=str(output), label='YOLO26s Segmentation result', preset='yolo26s-seg')]
             process = Mock()
             process.poll.side_effect = [None, 0]
@@ -170,14 +183,11 @@ while True:
                 patch.object(self.gui.subprocess,'Popen',side_effect=start_generation) as launch:
             menu = v.nametowidget(str(v.generate_button['menu']))
             menu.invoke(1)
-            launch.assert_not_called()
-            pointer = Path(self.gui.map_manifest_path(str(self.folder/'unused.bag')))
-            pointer.parent.mkdir(parents=True)
-            pointer.touch()
-            menu.invoke(1)
+            launch.assert_called_once()
             self.assertTrue(v.generate_button.instate(['disabled']))
             self.pump(lambda:v._semantic_proc is None)
             self.assertEqual(v.semantic_picker.get(), self.gui.SEMANTIC_PRESETS['yolo26s-seg'])
+            self.assertIn(self.gui.tr('此结果使用里程计坐标。'), v.var_generation.get())
             self.pump(lambda:v._last.get('semantic_run') == v._semantic_output)
         v.close()
 
@@ -189,9 +199,6 @@ while True:
         app=self.gui.App(self.root,str(self.folder));self.root.update()
         self.assertEqual(app.mode,'sessions');self.assertFalse(app.body.winfo_ismapped())
         app.catalog.selection_set(app.catalog.get_children()[0])
-        pointer = Path(self.gui.map_manifest_path(str(session/'cam_test_0.bag')))
-        pointer.parent.mkdir(parents=True)
-        pointer.touch()
         with patch.object(self.gui,'BagViewer') as viewer:
             self.root.nametowidget(str(app.btn_semantic['menu'])).invoke(1)
             viewer.assert_called_once_with(self.root,str(session),'cam_test_0.bag',preset='yolo26s-seg')
