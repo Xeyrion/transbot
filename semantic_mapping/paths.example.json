@@ -1,4 +1,6 @@
 {
   "data_dir": "bags",
-  "models_dir": "models"
+  "models_dir": "models",
+  "archive_dir": "archive",
+  "yolo_python": "~/miniconda3/envs/yolo/bin/python"
 }

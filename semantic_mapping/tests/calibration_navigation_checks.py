@@ -63,7 +63,7 @@ try:
     cc.report(np.eye(3),np.array([.08,0,.1]),np.eye(4),a)
     candidate=json.load(open(a.out)); assert candidate['estimated'] and candidate['transforms'][0]['quaternion_xyzw']==[0.,0.,0.,1.]
     out=os.path.join(scratch,'repaired')
-    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','prepare_navigation.py'),path,out,
+    subprocess.check_call([sys.executable,os.path.join(ROOT,'semantic','prepare_navigation.py'),path,out,
         '--calibration',a.out,'--override-recorded-extrinsics','--allow-estimated-extrinsics',
         '--record-start','10.05','--record-end','10.45'])
     repair=json.load(open(os.path.join(out,'repair.json')))
@@ -71,7 +71,8 @@ try:
     assert ['base_link','camera_link'] in repair['replaced_installation_edges']
     edges=[]
     with rosbag.Bag(repair['output']) as bag:
-        assert all(c.header.get('latching')=='1' for c in bag._get_connections(topics=['/tf_static']))
+        assert all(c.header.get('latching') in ('1', b'1')
+                   for c in bag._get_connections(topics=['/tf_static']))
         static_messages=list(bag.read_messages(topics=['/tf_static']))
         assert len(static_messages)==1
         static_edges={(t.header.frame_id,t.child_frame_id) for t in static_messages[0][1].transforms}

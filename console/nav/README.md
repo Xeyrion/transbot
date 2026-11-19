@@ -5,6 +5,13 @@ without the user touching a terminal. It is self-contained: launch files,
 planner parameters and helper nodes all live here, and maps go to
 `../maps/`.
 
+The control PC needs `global_planner` and `dwa_local_planner` in addition to
+gmapping, AMCL, map_server and move_base. Missing planner packages stop startup
+before it takes control. Ready status requires live nodes and the
+`/move_base/make_plan` service, not just a map topic. Install the packages for
+the local ROS distribution, for example
+`sudo apt install ros-noetic-global-planner ros-noetic-dwa-local-planner`.
+
 ```
 panel.py    the tab (mode selector, map controls, canvas, teleop) — view only
 model.py    subscriptions, live pose, goal publishing; survives a language switch

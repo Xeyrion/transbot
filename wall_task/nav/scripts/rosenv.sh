@@ -25,7 +25,7 @@ else
 fi
 unset _rosenv_ip
 
-source /opt/ros/melodic/setup.bash
+source "$(dirname "${BASH_SOURCE[0]}")/../../../runtime/ros_env.sh" || return $?
 if [ -f "$HOME/transbot_ws/devel/setup.bash" ]; then
     source "$HOME/transbot_ws/devel/setup.bash"
 fi

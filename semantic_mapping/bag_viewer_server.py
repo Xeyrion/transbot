@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Long-lived bag reader: keeps one bag open and answers seek requests.
 
-The GUI (py3) can't import rosbag (Melodic's is py2-only), so this process stays
-alive and serves frames over stdin/stdout:
+The reader uses the local ROS Python (Melodic py2 / Noetic py3), independently
+of the GUI, and stays alive to serve frames over stdin/stdout:
 
     in   {"t": 12.34}                seek to 12.34 s into the bag
     out  {"t": 12.30, "rgb": "...ppm", "depth": "...pgm",
@@ -12,7 +12,7 @@ alive and serves frames over stdin/stdout:
 Frames are written to fixed paths (overwritten each seek) so the GUI can load
 them right after reading the reply.
 
-    python2 bag_viewer_server.py <bag>
+    <ROS Python> bag_viewer_server.py <bag>
 """
 from __future__ import print_function
 from i18n import tr
@@ -145,14 +145,14 @@ class PoseIndex(TransformIndex):
 def write_ppm(path, arr):
     h, w = arr.shape[:2]
     with open(path, 'wb') as f:
-        f.write('P6\n%d %d\n255\n' % (w, h))
+        f.write(('P6\n%d %d\n255\n' % (w, h)).encode('ascii'))
         f.write(arr.tobytes())
 
 
 def write_pgm(path, arr):
     h, w = arr.shape[:2]
     with open(path, 'wb') as f:
-        f.write('P5\n%d %d\n255\n' % (w, h))
+        f.write(('P5\n%d %d\n255\n' % (w, h)).encode('ascii'))
         f.write(arr.tobytes())
 
 

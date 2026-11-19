@@ -7,7 +7,7 @@
 Gazebo 里一个平面 2R 机械臂，配一个双滑块控制面板，滑块位置即目标角度。
 带 `--real` 启动时真机同步默认开启：对齐真机后滑块同时发真机，限位显示在开关旁边。
 
-- ROS Melodic / Gazebo 9
+- ROS Melodic / Gazebo 9 或 ROS Noetic / Gazebo 11
 - 纯 `launch/urdf/world` 包，不需要 catkin 编译
 - 控制器：`position_controllers/JointGroupPositionController`
 - 话题：`/arm_controller/command`（`std_msgs/Float64MultiArray`，两个关节角）
@@ -138,9 +138,9 @@ CALIBRATION.md                              实测标定记录
 
 面板可以把滑块角度同步发给真机，链路是 UDP（本机面板 → agent → 真机 `/TargetAngle`）。
 
-> **运行环境**：`run_simple_agent.sh` 用 `python2` 启动 agent —— ROS Melodic 的
-> `rospy` 默认是 Python 2。脚本语法本身兼容 py2/py3，但能否 `import rospy` /
-> `transbot_msgs` 由 Melodic 环境决定。agent 要连真机的 ROS master，通常放在
+> **运行环境**：`run_simple_agent.sh` 随本机 ROS 选择解释器，Melodic 使用
+> Python 2，Noetic 使用 Python 3。脚本语法兼容 py2/py3，但能否 `import rospy` /
+> `transbot_msgs` 由本机 ROS 环境决定。agent 要连真机的 ROS master，通常放在
 > Jetson 上跑，也可以放在任何能访问该 master 的机器上。
 >
 > **安全**：agent 默认**使能**，会真的驱动舵机。第一次务必先 `--read-only`

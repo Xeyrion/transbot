@@ -127,7 +127,7 @@ if [ -n "$ENVSH" ]; then
     ok "sourced $ENVSH"
 else
     warn "env.sh not found; using a bare ROS environment"
-    source /opt/ros/melodic/setup.bash 2>/dev/null
+    source "$ROOT/runtime/ros_env.sh"
 fi
 
 if [ "$OFFLINE" -eq 0 ] && ! probe_master "$ROBOT"; then

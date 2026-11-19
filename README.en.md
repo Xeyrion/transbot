@@ -1,6 +1,6 @@
 # Transbot
 
-Semantic mapping, remote control, arm simulation and wall tasks for the Yahboom Transbot tracked robot, using ROS 1 Melodic.
+Semantic mapping, remote control, arm simulation and wall tasks for the Yahboom Transbot tracked robot, using ROS 1. The control PC supports Melodic and Noetic; the robot uses Melodic.
 
 [中文](README.md) ｜ **English**
 
@@ -81,7 +81,7 @@ Any remaining local `bagtools/` directory stores existing data or history only. 
 
 The project tables are generated from `docs/projects.json`. Run `python3 tools/check_repository.py --write-index` after editing that registry, then stage files and run `python3 tools/check_repository.py`. GitHub Actions checks published links, launchers, syntax and data exclusions, and runs offline tests.
 
-Ubuntu 18.04 / ROS Melodic is used on the control PC, with Jetson Nano / JetPack 4.5 on the robot. Semantic tools use Python 3 for the GUI, ROS Python 2 for bags, and an isolated Conda environment for YOLO. See each project for its dependencies.
+The control PC supports Ubuntu 18.04 / ROS Melodic or Ubuntu 20.04 / ROS Noetic, with Jetson Nano / JetPack 4.5 / Melodic on the robot. Semantic tools use Python 3 for the GUI, the local ROS Python for bags, and an isolated Conda or venv environment for YOLO. See each project for its dependencies.
 
 Joint limits: j7 0–225°, j8 15–240°, j9 60–180°. Geometry is documented in [arm/CALIBRATION.md](arm/CALIBRATION.md).
 

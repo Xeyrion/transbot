@@ -21,7 +21,7 @@
   <arg name="initial_cov_aa" default="0.0025"/>
 
   <node pkg="map_server" type="map_server" name="map_server"
-        args="$(arg map_file)"/>
+        args="&quot;$(arg map_file)&quot;"/>
 
   <node pkg="amcl" type="amcl" name="amcl" output="screen">
     <param name="use_map_topic"             value="true"/>

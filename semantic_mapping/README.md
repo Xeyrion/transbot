@@ -57,10 +57,12 @@ transbot/semantic_mapping/     GitHub 项目源码
 - [语义算法](docs/semantic_algorithm.md) · [相机外参](docs/calibration.md)
 - [裂缝图片与分割标注](semantic/LABELING.md)
 
-控制机：Ubuntu 18.04 / ROS Melodic；GUI 使用 Python 3，bag 读取使用 ROS Python 2，YOLO 使用独立 Conda 环境。
+控制机支持 Ubuntu 18.04 / ROS Melodic 或 Ubuntu 20.04 / ROS Noetic。GUI 使用 Python 3，bag 读取在 Melodic 下使用 Python 2、Noetic 下使用 Python 3；启动器自动选择本机 ROS。需要指定安装时设置 `TRANSBOT_ROS_SETUP`，需要指定 bag 解释器时设置 `BAGTOOLS_ROS_PYTHON`。
+
+YOLO 使用独立 Conda 或 venv。可在 `paths.local.json` 中添加 `"yolo_python": "/absolute/path/to/env/bin/python"`，或设置 `BAGTOOLS_YOLO_PYTHON`。外接硬盘可作为 `data_dir`、`models_dir` 和建图档案 `archive_dir`；先确认磁盘已挂载，再启动回传或离线任务，已有数据无需搬动。
 
 ```bash
-source /opt/ros/melodic/setup.bash
+source ../runtime/ros_env.sh
 python3 -m unittest discover -s tests
 BAGTOOLS_GUI_TEST=1 xvfb-run -a python3 -m unittest discover -s tests -p test_gui.py
 bash rebuild_map.sh /path/to/recording/first.bag           # 首次建图

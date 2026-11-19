@@ -40,7 +40,7 @@ def write_pgm(path, msg):
         for value in data[y * width:(y + 1) * width]:
             pixels.append(205 if value < 0 else int(round((100 - value) * 254 / 100.0)))
     with open(path, 'wb') as f:
-        f.write('P5\n%d %d\n255\n' % (width, height))
+        f.write(('P5\n%d %d\n255\n' % (width, height)).encode('ascii'))
         f.write(bytes(pixels))
 
 

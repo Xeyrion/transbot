@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 from viewer_core import session_files,map_directory,map_manifest_path
+from ros_runtime import ros_python
+from project_paths import configured_path
 
 HERE=Path(__file__).resolve().parent
 
@@ -34,7 +36,7 @@ def map_artifacts(bag):
 
 
 def archive_root():
-    return Path(os.environ.get('BAGTOOLS_ARCHIVE_DIR',str(HERE/'archive'))).expanduser().resolve()
+    return Path(configured_path('archive_dir', ('BAGTOOLS_ARCHIVE_DIR',), str(HERE/'archive'))).resolve()
 
 
 def new_job(bag):
@@ -155,7 +157,7 @@ class MappingJob:
             pointer=Path(map_manifest_path(files[0]));previous=pointer.read_bytes() if pointer.exists() else None
             sources=source_snapshot(files)
             (self.job/'request.json').write_text(json.dumps(dict(bag=self.bag,sources=sources,replace=self.replace),indent=2))
-            probe=self.run_command(['python2',str(HERE/'mapping_probe.py'),self.bag],'inspect',True)
+            probe=self.run_command([ros_python(),str(HERE/'mapping_probe.py'),self.bag],'inspect',True)
             atomic_json(self.job/'inspection.json',probe)
             self.update('rebuild',partial=probe['partial'],record_bounds=probe['record_bounds'],selected_duration_s=probe['selected']['record_end']-probe['selected']['record_start'])
             with socket.socket() as sock:

@@ -39,6 +39,8 @@ jobs:
           PY
       - name: Test arm kinematics
         run: python -m unittest discover -s arm/tests
+      - name: Test navigation startup checks
+        run: python -m unittest discover -s console/tests
       - name: Test wall-task kinematics
         run: python -m unittest discover -s wall_task/wallline/tests
       - name: Test wall-task map geometry

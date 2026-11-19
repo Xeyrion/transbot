@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """One bag -> one JSON line of quality metrics.
 
-Runs on python2 because Melodic's rosbag is py2-only. The GUI (py3) shells out
-to this and reads the JSON.
+Runs on the local ROS Python (Melodic py2 / Noetic py3). The GUI (py3)
+shells out to this and reads the JSON.
 
     python2 bag_quality_probe.py <bag>            # fast: index only
     python2 bag_quality_probe.py <bag> --odom     # also walk /odom for distance
@@ -68,7 +68,7 @@ def dump_frame(bag, topic, out_path, at=0.5):
                 return False
             arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
             with open(out_path, 'wb') as f:
-                f.write('P6\n%d %d\n255\n' % (msg.width, msg.height))
+                f.write(('P6\n%d %d\n255\n' % (msg.width, msg.height)).encode('ascii'))
                 f.write(arr.tobytes())
             return True
     except Exception:

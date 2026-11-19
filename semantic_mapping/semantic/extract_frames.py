@@ -10,9 +10,6 @@ import json
 import os
 import sys
 
-if sys.version_info[0] != 2:
-    sys.exit('Use python2 extract_frames.py (ROS Melodic rosbag)')
-
 import numpy as np
 import rosbag
 import rospy

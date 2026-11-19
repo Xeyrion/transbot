@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Bag quality board -- point it at a folder, see which takes are usable.
 
-Every number here comes from bag_quality_probe.py (python2, because Melodic's
-rosbag is py2-only). This window is the py3 side: it shells out, parses one JSON
+Every number here comes from bag_quality_probe.py (the local ROS Python).
+This window is the py3 side: it shells out, parses one JSON
 line per bag, and paints a table.
 
 Verdict rules (tuned on the 2026-11-10 takes):
@@ -33,6 +33,7 @@ from mapping_job import recording_groups, map_artifacts, new_job, read_status
 from semantic_presets import PRESETS
 from viewer_core import semantic_directory
 from project_paths import default_data_dir
+from ros_runtime import ros_command
 
 import tkinter as tk
 from i18n import language, tr
@@ -400,11 +401,7 @@ class App(object):
         key = self._quality_key(bag)
         if not extra and key in self._quality_cache:
             return self._quality_cache[key]
-        # 探针是 python2 + rosbag，必须带 ROS 环境；不管窗口是从哪起的都补上
-        inner = ' '.join([shlex.quote('python2'), shlex.quote(PROBE),
-                          shlex.quote(os.path.join(self.folder, bag))] +
-                         [shlex.quote(a) for a in extra])
-        cmd = ['bash', '-c', 'source /opt/ros/melodic/setup.bash 2>/dev/null; exec ' + inner]
+        cmd = ros_command([PROBE, os.path.join(self.folder, bag)] + list(extra))
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            universal_newlines=True, timeout=900)
         for line in p.stdout.strip().splitlines():
@@ -522,8 +519,8 @@ class App(object):
             if previous and not messagebox.askyesno(tr('替换已有地图？'),
                     tr('已存在地图。是否用本次数据重新建图并替换当前地图？\n旧地图会保留备份，原始 bag 不会修改。'),parent=self.root):return
             job=new_job(bag)
-            command=['bash','-c','source /opt/ros/melodic/setup.bash 2>/dev/null; exec '+
-                     ' '.join(shlex.quote(v) for v in [sys.executable,os.path.join(HERE,'mapping_job.py'),bag,'--job',str(job)]+(['--replace'] if previous else []))]
+            command=ros_command([os.path.join(HERE,'mapping_job.py'),bag,'--job',str(job)]+
+                                (['--replace'] if previous else []),python=sys.executable)
             with (job/'console.log').open('ab') as log:
                 self._mapping_proc=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             self._mapping_job=job;self._mapping_bag=bag;self.busy=True
@@ -724,8 +721,7 @@ class App(object):
             if image is None:
                 fd, preview = tempfile.mkstemp(suffix='.ppm',prefix='bag-preview-');os.close(fd)
                 try:
-                    p = subprocess.Popen(['bash','-c','source /opt/ros/melodic/setup.bash 2>/dev/null; exec python2 %s %s --frame %s'
-                        %(shlex.quote(PROBE),shlex.quote(path),shlex.quote(preview))],
+                    p = subprocess.Popen(ros_command([PROBE,path,'--frame',preview]),
                         stdout=subprocess.PIPE,stderr=subprocess.PIPE)
                     self._preview_proc = p
                     if self._closing:p.terminate()
@@ -763,7 +759,7 @@ class App(object):
 class BagViewer(tk.Toplevel):
     """双击包名打开：拖时间轴看那一刻的彩色/深度/雷达/位姿。
 
-    真正读包的是 bag_viewer_server.py（python2 常驻进程），这里只发时间、收
+    真正读包的是 bag_viewer_server.py（ROS Python 常驻进程），这里只发时间、收
     一帧的结果。常驻是为了不用每次重新打开 bag —— 2 GB 的包重开一次要好几秒。
     """
 
@@ -834,9 +830,7 @@ class BagViewer(tk.Toplevel):
         self._loading_tick()
         try:
             self.proc = subprocess.Popen(
-                ['bash', '-c', 'source /opt/ros/melodic/setup.bash 2>/dev/null; '
-                               'exec python2 %s %s'
-                               % (shlex.quote(SERVER), shlex.quote(os.path.join(folder, bag)))],
+                ros_command([SERVER, os.path.join(folder, bag)]),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=self._reader_log, universal_newlines=True, bufsize=1)
         except Exception as exc:

@@ -44,6 +44,8 @@ flowchart TB
 
 `wall_task` 的启动脚本复用 `console/env.sh`。除此以外，四个项目不是彼此嵌套启动的一套服务。墙面任务使用自己的 `wallline/line_tool.py`，并未直接导入 `arm/line_tool.py`；两者目前保持独立测试。
 
+导航规划器依赖属于控制机：当前配置需要 `global_planner` 和 `dwa_local_planner`。控制台在接管导航前检查依赖，并在启动后检查节点存活和 `move_base/make_plan` 服务；仅有建图节点或地图话题不能报告导航已就绪。
+
 ## 语义建图的数据流
 
 ```mermaid
@@ -63,9 +65,11 @@ flowchart LR
 
 栅格图像不是物品定位的前提。单帧统一坐标定位也需要深度、相机内外参和机器人位姿；没有关联地图时使用 odom 位姿。底图可选不等于位姿可省略。详细算法只在[语义算法文档](../semantic_mapping/docs/semantic_algorithm.md)维护。
 
-GUI 使用 Python 3；ROS Melodic bag 读取与抽帧使用 ROS Python 2；YOLO 使用独立 Conda Python。阅读器通过常驻子进程交换帧和状态，避免在 GUI 解释器中混装 ROS 与模型依赖。
+GUI 使用 Python 3；bag 读取与抽帧跟随控制机的 ROS：Melodic 使用 Python 2，Noetic 使用 Python 3。YOLO 使用独立 Conda 或 venv，通过本机配置 `yolo_python` 指定。阅读器通过常驻子进程交换帧和状态，避免在 GUI 解释器中混装 ROS 与模型依赖。
 
-这是语义工作台的解释器分工；`arm/` 的 Gazebo 面板使用 Melodic 的 Python 2 / Tkinter，与控制台和墙面任务的 Python 3 界面不同。导航重定位可选用 SciPy 加速，语义实验比较图额外使用 Matplotlib。GitHub 的 Python 3.11 离线检查不代替这些 ROS 运行环境。
+`runtime/ros_env.sh` 为四个项目选择本机 ROS 1 安装：优先 `TRANSBOT_ROS_SETUP`，其次已激活的 `ROS_DISTRO`，再依次检测 Melodic、Noetic。语义工具的 `ros_runtime.py` 使用相同选择规则，并允许 `BAGTOOLS_ROS_PYTHON` 指定 bag 解释器。共享入口不修改 ROS master 或机器人的网络配置；机器人部署包继续使用 Jetson 上的 Melodic。`arm/` 的 Gazebo 面板随 ROS 使用 Python 2 / Tkinter 或 Python 3 / tkinter。导航重定位可选用 SciPy 加速，语义实验比较图额外使用 Matplotlib。GitHub 的 Python 3.11 离线检查不代替这些 ROS 运行环境。
+
+控制机可选的用户级 ROS 依赖环境由 `~/.local/share/transbot/ros/<ROS_DISTRO>/setup.bash` 加载，适用于无法全局安装依赖的机器；内容由该机器维护，不提交到源码仓库。
 
 ```text
 源码仓库：transbot/semantic_mapping/
@@ -82,7 +86,7 @@ GUI 使用 Python 3；ROS Melodic bag 读取与抽帧使用 ROS Python 2；YOLO 
     comparisons/           本录制的实验对照
 ```
 
-现有控制机继续使用 `~/robot_research/bagtools/bags` 和 `models`。其他安装可配置自己的目录。旧存储路径不是第二套源码工程。原始 bag、权重、标注图片、批量输出、本机配置和 `_local` 均不发布；仓库只带选定的小型示例地图与演示素材。
+现有控制机继续使用 `~/robot_research/bagtools/bags` 和 `models`。其他安装可配置自己的目录，包括已挂载的外接硬盘；新回传的包及其派生结果写入该 `data_dir`，共享权重写入 `models_dir`。拔盘前先结束回传和离线任务，重新使用前确认磁盘已挂载。旧存储路径不是第二套源码工程。原始 bag、权重、标注图片、批量输出、本机配置和 `_local` 均不发布；仓库只带选定的小型示例地图与演示素材。
 
 ## 进程与控制权
 

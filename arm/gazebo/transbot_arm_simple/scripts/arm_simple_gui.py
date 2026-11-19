@@ -24,7 +24,10 @@ import rospy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
-import Tkinter as tk
+try:
+    import Tkinter as tk
+except ImportError:
+    import tkinter as tk
 
 from arm_udp import ArmUdpClient, DEFAULT_PORT
 

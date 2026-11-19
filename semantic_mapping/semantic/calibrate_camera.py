@@ -19,9 +19,10 @@ import math
 import os
 import sys
 import json
-if sys.version_info[0]!=2:
-    if __name__=='__main__': os.execvp('python2',['python2',os.path.abspath(__file__)]+sys.argv[1:])
-    raise ImportError('Calibration bag collection requires python2')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ros_runtime import ros_python, ros_python_major
+if __name__ == '__main__' and sys.version_info[0] != ros_python_major():
+    os.execvp(ros_python(), [ros_python(), os.path.abspath(__file__)]+sys.argv[1:])
 
 import numpy as np
 import rosbag

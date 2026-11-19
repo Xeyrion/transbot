@@ -9,6 +9,7 @@
   <arg name="gui" default="true"/>
   <arg name="paused" default="false"/>
   <arg name="init_pose" default="true"/>
+  <arg name="ros_python" default="$(eval 'python3' if env('ROS_DISTRO') == 'noetic' else 'python2')"/>
   <arg name="world" default="$(find transbot_arm_simple)/worlds/arm_simple.world"/>
   <arg name="urdf" default="$(find transbot_arm_simple)/urdf/arm_simple.urdf"/>
 
@@ -37,5 +38,5 @@
 
   <!-- Optional: move to the ready pose after controllers start. -->
   <node name="arm_init_pose" pkg="transbot_arm_simple" type="set_pose_simple.py"
-        output="screen" if="$(arg init_pose)"/>
+        output="screen" if="$(arg init_pose)" launch-prefix="$(arg ros_python)"/>
 </launch>

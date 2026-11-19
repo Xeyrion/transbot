@@ -16,7 +16,8 @@ sys.path.insert(0, ROOT)
 from viewer_core import association, session_files, semantic_directory
 from semantic_presets import PRESETS, PRESET_ALIASES
 from semantic_storage import digest, snapshot_map
-from project_paths import models_dir
+from project_paths import models_dir, configured_path
+from ros_runtime import ros_python
 
 
 PROFILES = {key: (title, english, weights, projection) for key, title, english, weights, projection in PRESETS}
@@ -83,9 +84,10 @@ def main():
         clean_env.pop('PYTHONPATH', None); clean_env.pop('PYTHONHOME', None)
         if backend == 'yolo26':
             candidates = [os.path.expanduser(p) for p in
-                ['~/miniconda3/envs/yolo/bin/python', '~/miniconda3/bin/python']]
+                [configured_path('yolo_python',('BAGTOOLS_YOLO_PYTHON',),'~/miniconda3/envs/yolo/bin/python'),
+                 '~/miniconda3/bin/python', sys.executable]]
             python = next((p for p in candidates if os.path.isfile(p)), None)
-            if not python: raise ValueError('YOLO environment missing; explicitly select BACKEND=cv2 to use Darknet')
+            if not python: raise ValueError('YOLO environment missing; set BAGTOOLS_YOLO_PYTHON')
             weights = os.path.abspath(os.path.expanduser(settings.get('SEMANTIC_WEIGHTS', os.path.join(models_dir(),'yolo26s.pt'))))
             if not os.path.isfile(weights): raise ValueError('Local weights missing: '+weights)
             clean_env['SEMANTIC_WEIGHTS'] = weights
@@ -112,7 +114,7 @@ def main():
             with open(snapshot_association, 'w') as f:
                 json.dump(snapshot_link, f, indent=2)
             settings['MAP_ASSOCIATION'] = snapshot_association
-        extract = ['python2', os.path.join(HERE,'extract_frames.py'), sources[0], out,
+        extract = [ros_python(), os.path.join(HERE,'extract_frames.py'), sources[0], out,
             '--step', settings.get('STEP','1'), '--max-pair-ms', settings.get('MAX_PAIR_MS','33')]
         extract += ['--all'] if args.preset else ['--max', settings.get('MAX_FRAMES', '120')]
         for envkey, flag in [('WORLD_FRAME','--root'),('RECORD_START','--record-start'),

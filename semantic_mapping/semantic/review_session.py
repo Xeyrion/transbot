@@ -5,9 +5,11 @@ import argparse
 import json
 import os
 import sys
-if sys.version_info[0]!=2: os.execvp('python2',['python2',os.path.abspath(__file__)]+sys.argv[1:])
-import rosbag
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ros_runtime import ros_python, ros_python_major
+if __name__ == '__main__' and sys.version_info[0] != ros_python_major():
+    os.execvp(ros_python(), [ros_python(), os.path.abspath(__file__)]+sys.argv[1:])
+import rosbag
 from viewer_core import session_files
 from time_segments import review
 

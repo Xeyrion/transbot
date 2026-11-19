@@ -12,6 +12,7 @@ import time
 root=Path(sys.argv[1]).resolve();sys.path.insert(0,str(root))
 from mapping_job import new_job,read_status
 from viewer_core import map_manifest_path
+from ros_runtime import ros_python
 
 fixture='''import rosbag,rospy,math,sys
 from geometry_msgs.msg import TransformStamped
@@ -55,7 +56,7 @@ def spawn(bag,job):
 
 
 def read_frame(bag):
-    p=subprocess.Popen(['python2',str(root/'bag_viewer_server.py'),str(bag)],stdin=subprocess.PIPE,
+    p=subprocess.Popen([ros_python(),str(root/'bag_viewer_server.py'),str(bag)],stdin=subprocess.PIPE,
                        stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     try:
         stdout,stderr=p.communicate('{"t":3,"frame":"map"}\n{"cmd":"close"}\n',timeout=20)
@@ -70,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='mapping-ros-integration-') as temp:
     folder=Path(temp);bag=folder/'cam_20261115_120000_0.bag'
     os.environ['BAGTOOLS_ARCHIVE_DIR']=str(folder/'archive')
     generator=folder/'fixture.py';generator.write_text(fixture)
-    subprocess.run(['python2',str(generator),str(bag)],check=True)
+    subprocess.run([ros_python(),str(generator),str(bag)],check=True)
     original=hashlib.sha256(bag.read_bytes()).hexdigest()
     pointer=Path(map_manifest_path(str(bag)));pointer.parent.mkdir(parents=True)
     old=b'{"legacy_static_map":true}';pointer.write_bytes(old)
@@ -87,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='mapping-ros-integration-') as temp:
     assert info['map_note'] and abs(info['dur']-3.)<1e-6 and info['map_info'],info
     linked['record_bounds']=[2000.,2010.];pointer.write_text(json.dumps(linked))
     # The reader must reject requests to use the old map outside the rebuilt interval.
-    p=subprocess.Popen(['python2',str(root/'bag_viewer_server.py'),str(bag)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
+    p=subprocess.Popen([ros_python(),str(root/'bag_viewer_server.py'),str(bag)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     stdout,stderr=p.communicate('{"cmd":"close"}\n',timeout=20)
     info=json.loads(stdout.splitlines()[0]);assert info['world']=='odom' and info['map_info'] is None and info['warning'],info
     pointer.write_bytes(current)
@@ -101,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='mapping-ros-integration-') as temp:
     assert status['state']=='cancelled' and pointer.read_bytes()==current,status
     # An invalid navigation bag must fail without touching an existing pointer.
     invalid=folder/'invalid';invalid.mkdir();bad=invalid/'cam_20261115_130000_0.bag'
-    subprocess.run(['python2','-c',"import rosbag,sys; rosbag.Bag(sys.argv[1],'w').close()",str(bad)],check=True)
+    subprocess.run([ros_python(),'-c',"import rosbag,sys; rosbag.Bag(sys.argv[1],'w').close()",str(bad)],check=True)
     bad_pointer=Path(map_manifest_path(str(bad)));bad_pointer.parent.mkdir(parents=True);bad_pointer.write_bytes(old)
     failed=new_job(str(bad));code,status=wait_worker(spawn(bad,failed),failed)
     assert status['state']=='failed' and bad_pointer.read_bytes()==old,status

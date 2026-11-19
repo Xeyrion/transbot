@@ -31,7 +31,7 @@ for a in "$@"; do
   fi
 done
 
-source /opt/ros/melodic/setup.bash
+source "$ROOT/../runtime/ros_env.sh"
 if [ -f "$HOME/transbot_ws/devel/setup.bash" ]; then
   source "$HOME/transbot_ws/devel/setup.bash"
 fi
@@ -83,4 +83,4 @@ if [ "$ready" != 1 ]; then
 fi
 sleep 1
 
-rosrun transbot_arm_simple arm_simple_gui.py "${GUI_ARGS[@]}"
+"python${ROS_PYTHON_VERSION:-2}" "$HERE/transbot_arm_simple/scripts/arm_simple_gui.py" "${GUI_ARGS[@]}"

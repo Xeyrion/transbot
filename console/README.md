@@ -4,7 +4,7 @@
 
 System boundaries and documentation ownership: [architecture guide](../docs/ARCHITECTURE.md).
 
-PC-side console for the Yahboom Transbot robot (ROS 1 Melodic). Everything goes
+PC-side console for the Yahboom Transbot robot (ROS 1 Melodic or Noetic). Everything goes
 through the ROS master on the robot — nothing has to be copied onto it.
 
 ![ROS Melodic](https://img.shields.io/badge/ROS-Melodic-blue) ![Python 3](https://img.shields.io/badge/Python-3-green) ![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
@@ -182,7 +182,7 @@ WiFi/video numbers.
 
 ## Requirements
 
-- Ubuntu 18.04 + ROS Melodic on the control PC, robot on the same WiFi (AP or STA)
+- Ubuntu 18.04 + ROS Melodic or Ubuntu 20.04 + ROS Noetic on the control PC; robot reachable by WiFi (AP or STA) or Ethernet. The shared `runtime/ros_env.sh` selects local ROS; robot drivers remain on Melodic.
 - Vendor packages on the ROS path: `transbot_msgs` (bundled in `vendor/`, catkin
   build optional), `transbot_laser` / `transbot_linefollow` (tasks 05/06 only),
   `teleop_twist_keyboard`, `rqt_image_view`, `rviz`

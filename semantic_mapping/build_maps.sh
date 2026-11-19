@@ -10,7 +10,7 @@
 set -eo pipefail
 # set -u 会让 ROS 的 setup.bash 静默退出（里面引用了未定义变量）
 set +u
-source /opt/ros/melodic/setup.bash
+source "$(dirname "${BASH_SOURCE[0]}")/../runtime/ros_env.sh"
 set -u
 cd "$(dirname "$0")"
 exec python3 build_maps.py "$@"

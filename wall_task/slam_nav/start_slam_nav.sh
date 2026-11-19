@@ -30,7 +30,7 @@ if [ -f "$HERE/../../console/env.sh" ]; then
     source "$HERE/../../console/env.sh" >/dev/null 2>&1
     ok "master $ROS_MASTER_URI, host $ROS_IP"
 else
-    source /opt/ros/melodic/setup.bash
+    source "$HERE/../../runtime/ros_env.sh"
     warn "console/env.sh not found"
 fi
 

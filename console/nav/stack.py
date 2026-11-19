@@ -395,6 +395,8 @@ class NavStack(object):
                 raise RuntimeError('navigation needs a map')
             if not self.map_exists(map_name):
                 raise RuntimeError('map not found: %s' % self.map_path(map_name))
+        if mode in (MODE_NAV, MODE_SLAMNAV):
+            self._check_planners()
         self.log('== %s ==' % self._mode_title(mode))
         try:
             self._step_robot(mode)
@@ -527,24 +529,24 @@ class NavStack(object):
         is accepted but never executed, which looks like a navigation bug.
         """
         distro = os.environ.get('ROS_DISTRO', 'melodic')
+        missing = []
         for pkg in ('global_planner', 'dwa_local_planner'):
             rc, _ = self._sh(['rospack', 'find', pkg], timeout=8)
             if rc == 0:
                 continue
+            missing.append(pkg)
             self.log('   warn  %s is not installed on this machine; move_base '
                      'will fail to create its planner' % pkg)
             self.log('         fix: sudo apt install ros-%s-%s'
                      % (distro, pkg.replace('_', '-')))
-            if pkg == 'global_planner':
-                # navfn ships with move_base itself and takes the same
-                # defaults, so this works with no install and no sudo.
-                self.log('         or, without root: set base_global_planner '
-                         'to "navfn/NavfnROS" in move_base_params.yaml')
+        if missing:
+            raise RuntimeError('Missing navigation packages: %s. Install: sudo apt install %s'
+                % (', '.join(missing), ' '.join('ros-%s-%s' %
+                   (distro, pkg.replace('_', '-')) for pkg in missing)))
 
     def _step_nav(self, map_name, pose):
         self.log('5/7 navigation stack (map %s)' % map_name)
         self._refuse_if_running('/move_base', 'move_base')
-        self._check_planners()
         self._spawn('nav', ['roslaunch',
                             os.path.join(self.launch_dir, 'nav.launch'),
                             'map_file:=%s' % self.map_path(map_name),
@@ -563,7 +565,6 @@ class NavStack(object):
         self.log('5/7 gmapping + move_base')
         self._refuse_if_running('/slam_gmapping', 'gmapping')
         self._refuse_if_running('/move_base', 'move_base')
-        self._check_planners()
         self._spawn('slamnav', ['roslaunch',
                                 os.path.join(self.launch_dir,
                                              'slam_nav.launch'),
@@ -617,12 +618,15 @@ class NavStack(object):
         want = ['/map_server', '/amcl', '/move_base'] if mode == MODE_NAV \
             else (['/slam_gmapping'] if mode == MODE_MAP
                   else ['/slam_gmapping', '/move_base'])
-        missing = [n for n in want if n not in nodes]
+        missing = [n for n in want if n not in nodes or not self._alive(n)]
         if missing:
-            self.log('   warn  missing: %s' % ' '.join(missing))
+            raise RuntimeError('Navigation startup failed; nodes unavailable: %s' % ' '.join(missing))
         else:
             self.log('   ok  %s' % ' '.join(want))
         if mode in (MODE_NAV, MODE_SLAMNAV):
+            rc, _ = self._sh(['rosservice', 'type', '/move_base/make_plan'], timeout=8)
+            if rc != 0:
+                raise RuntimeError('move_base planning service is unavailable; see planner/TF errors above')
             rc, out = self._sh(['rostopic', 'info', '/cmd_vel'], timeout=8)
             names = re.findall(r'^\s*\*\s*(/\S+)', out, re.M)
             # our own node and the relay are expected; anything else can

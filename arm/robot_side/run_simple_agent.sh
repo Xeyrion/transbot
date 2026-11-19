@@ -29,7 +29,7 @@ if [ -z "${ROBOT_IP:-}" ]; then
 fi
 ROBOT_IP="${ROBOT_IP:-127.0.0.1}"
 
-source /opt/ros/melodic/setup.bash
+source "$HERE/../../runtime/ros_env.sh"
 if [ -f "$HOME/transbot_ws/devel/setup.bash" ]; then
   source "$HOME/transbot_ws/devel/setup.bash"
 fi
@@ -48,4 +48,4 @@ if [ "$BOX_GIVEN" = 0 ]; then
 fi
 
 echo "[simple-agent] master=$ROS_MASTER_URI  ip=$ROS_IP  args: $*"
-exec python2 "$HERE/arm_udp_agent.py" "$@"
+exec "python${ROS_PYTHON_VERSION:-2}" "$HERE/arm_udp_agent.py" "$@"

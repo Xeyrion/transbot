@@ -10,7 +10,10 @@ import subprocess
 import sys
 import tempfile
 import time
-import xmlrpclib
+try:
+    import xmlrpclib
+except ImportError:
+    import xmlrpc.client as xmlrpclib
 import rosbag
 import rospy
 from geometry_msgs.msg import TransformStamped
@@ -47,7 +50,7 @@ try:
             for topic,msg in [('/scan',scan),('/odom',odom),('/tf',TFMessage([tr]))]:
                 bag.write(topic,msg,stamp)
     repaired=os.path.join(scratch,'repaired')
-    subprocess.check_call(['python2',os.path.join(root,'semantic','prepare_navigation.py'),source,repaired,
+    subprocess.check_call([sys.executable,os.path.join(root,'semantic','prepare_navigation.py'),source,repaired,
                            '--allow-estimated-extrinsics'])
     start(['roscore','-p',str(port)])
     master=xmlrpclib.ServerProxy(os.environ['ROS_MASTER_URI']);deadline=time.time()+20

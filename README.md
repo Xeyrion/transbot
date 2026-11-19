@@ -1,6 +1,6 @@
 # Transbot
 
-Yahboom Transbot 履带机器人的语义建图、遥控、机械臂与墙面任务项目，基于 ROS 1 Melodic。
+Yahboom Transbot 履带机器人的语义建图、遥控、机械臂与墙面任务项目，基于 ROS 1；控制机兼容 Melodic 和 Noetic，机器人使用 Melodic。
 
 **中文** ｜ [English](README.en.md)
 
@@ -102,7 +102,7 @@ transbot/
 
 ## 环境与硬件参数
 
-控制机为 Ubuntu 18.04 / ROS Melodic；机器人为 Jetson Nano / JetPack 4.5。语义工作台的 GUI 使用 Python 3，ROS bag 读取使用 Python 2，YOLO 在独立 Conda 环境运行，具体依赖见各项目说明。
+控制机支持 Ubuntu 18.04 / ROS Melodic 或 Ubuntu 20.04 / ROS Noetic；机器人为 Jetson Nano / JetPack 4.5 / Melodic。语义工作台的 GUI 使用 Python 3，bag 解释器跟随本机 ROS，YOLO 在独立 Conda 或 venv 环境运行，具体依赖见各项目说明。
 
 机械臂使用实测几何及统一关节限位：j7 为 0–225°，j8 为 15–240°，j9 为 60–180°。详见 [arm/CALIBRATION.md](arm/CALIBRATION.md)。
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
-"""从 bag 里抽图做标注数据集（rosbag 只有 py2）。
+"""从 bag 里抽图做标注数据集，使用本机 ROS 的 Python。
 
     python2 extract_images.py <bag或会话目录> <输出目录> [--fps 1] [--max 300]
 
@@ -15,11 +15,6 @@ import json
 import re
 import math
 
-
-if sys.version_info[0] != 2:
-    # Melodic 的 rosbag 只有 py2 版本。放在其它 import 之前，否则
-    # `import rosbag` 会先炸，报一个和真正原因无关的 ImportError。
-    sys.exit('这个脚本要用 python2 跑：python2 %s ...' % sys.argv[0])
 
 import numpy as np
 import rosbag

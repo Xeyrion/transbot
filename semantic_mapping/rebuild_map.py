@@ -13,6 +13,7 @@ import pathlib
 import sys
 
 from viewer_core import session_files
+from ros_runtime import ros_python
 
 
 def run_child(command):
@@ -58,7 +59,7 @@ for p in sys.argv[1:]:
  b.close()
 print(json.dumps(res))
 '''
-    done = subprocess.run(['python2', '-c', code]+sources, env=env,
+    done = subprocess.run([ros_python(), '-c', code]+sources, env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     text = (done.stdout or b'').decode('utf-8', 'replace').strip()
     if done.returncode != 0:
@@ -95,7 +96,7 @@ def main():
         target=pathlib.Path(args.output_dir).resolve(); target.mkdir(parents=True)
         if args.recompute:
             helper=os.path.join(os.path.dirname(__file__),'semantic','prepare_navigation.py')
-            cmd=['python2',helper,sources[0],str(target/'navigation')]
+            cmd=[ros_python(),helper,sources[0],str(target/'navigation')]
             for key,flag in [('calibration','--calibration'),('record_start','--record-start'),('record_end','--record-end')]:
                 if getattr(args,key) is not None: cmd += [flag,str(getattr(args,key))]
             for key in ['allow_estimated_extrinsics','override_recorded_extrinsics','allow_gaps']:

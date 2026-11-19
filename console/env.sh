@@ -36,9 +36,7 @@ _ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _VENDOR_PY="$_ENV_DIR/vendor/python"
 
 # ---- 0. Load ROS workspaces (always, before anything can bail out) ----
-if [ -f /opt/ros/melodic/setup.bash ]; then
-    source /opt/ros/melodic/setup.bash
-fi
+source "$_ENV_DIR/../runtime/ros_env.sh" || return $?
 
 # Some ROS Melodic images ship the Python modules only under
 # lib/python2.7/dist-packages (still importable from python3) but place

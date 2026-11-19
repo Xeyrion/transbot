@@ -28,7 +28,7 @@ if [ -f "$HERE/../../console/env.sh" ]; then
     source "$HERE/../../console/env.sh" >/dev/null 2>&1
     ok "sourced console/env.sh  (master $ROS_MASTER_URI, host $ROS_IP)"
 else
-    source /opt/ros/melodic/setup.bash
+    source "$HERE/../../runtime/ros_env.sh"
     warn "console/env.sh not found; using bare ROS"
 fi
 if ! timeout 3 bash -c "echo > /dev/tcp/$(echo "$ROS_MASTER_URI" | sed -E 's#.*://([^:/]+).*#\1#')/11311" 2>/dev/null; then

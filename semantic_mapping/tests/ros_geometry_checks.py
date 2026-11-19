@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
-"""Offline ROS integration fixtures; run explicitly with python2 and project root."""
+"""Offline ROS integration fixtures; run with the ROS Python and project root."""
 from __future__ import print_function
 import json
 import os
@@ -50,8 +50,8 @@ try:
                     msg.encoding='bgr8';msg.data=np.tile(np.array([10,20,30],dtype=np.uint8),(8,12,1)).tostring()
                 bag.write(topic,msg,rospy.Time.from_sec(s+.002))
     # Fresh sessions without any map association must still preview RGB/depth.
-    reader=subprocess.Popen(['python2',os.path.join(ROOT,'bag_viewer_server.py'),path],
-                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    reader=subprocess.Popen([sys.executable,os.path.join(ROOT,'bag_viewer_server.py'),path],
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     try:
         metadata=json.loads(reader.stdout.readline())
         assert metadata['world']=='odom' and metadata['map_info'] is None,metadata
@@ -65,7 +65,7 @@ try:
         if reader.poll() is None:reader.terminate();reader.wait()
         reader.stdin.close();reader.stdout.close();reader.stderr.close()
     out=os.path.join(scratch,'frames')
-    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_frames.py'),path,out,
+    subprocess.check_call([sys.executable,os.path.join(ROOT,'semantic','extract_frames.py'),path,out,
                            '--max','3','--step','.09','--root','odom'])
     sampling=json.load(open(os.path.join(out,'sampling.json')))
     assert sampling['frames']==3
@@ -87,8 +87,8 @@ try:
     save_json('objects.json',dict(base,objects=[]))
     # Distinct sample colour proves this isn't a neighbouring raw RGB image.
     PillowImage.new('RGB',(12,8),(10,20,30)).save(os.path.join(out,'0000','rgb.png'))
-    reader=subprocess.Popen(['python2',os.path.join(ROOT,'bag_viewer_server.py'),path],
-                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    reader=subprocess.Popen([sys.executable,os.path.join(ROOT,'bag_viewer_server.py'),path],
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     try:
         metadata=json.loads(reader.stdout.readline())
         def request(data):
@@ -113,7 +113,7 @@ try:
         if reader.poll() is None:reader.terminate();reader.wait()
     # Intrinsics published once before a selected segment remain usable.
     segment=os.path.join(scratch,'segment')
-    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_frames.py'),path,segment,
+    subprocess.check_call([sys.executable,os.path.join(ROOT,'semantic','extract_frames.py'),path,segment,
         '--max','1','--record-start','10.14','--record-end','10.29','--root','odom'])
     # Big-endian depth values and correct target resolution.
     msg=Image(); msg.width=2; msg.height=1; msg.step=4; msg.encoding='16UC1'; msg.is_bigendian=1
@@ -128,11 +128,11 @@ try:
     pgm=os.path.join(scratch,'map.pgm'); extract_map.write_pgm(pgm,grid)
     assert np.asarray(PillowImage.open(pgm)).tolist()==[[205,127],[254,0]]
     # Existing output must be refused, including when fewer frames are requested.
-    proc=subprocess.Popen(['python2',os.path.join(ROOT,'semantic','extract_frames.py'),path,out,'--max','1'],
-                          stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    proc=subprocess.Popen([sys.executable,os.path.join(ROOT,'semantic','extract_frames.py'),path,out,'--max','1'],
+                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     stdout,stderr=proc.communicate(); assert proc.returncode!=0
     image_out=os.path.join(scratch,'label_images')
-    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_images.py'),path,image_out,
+    subprocess.check_call([sys.executable,os.path.join(ROOT,'semantic','extract_images.py'),path,image_out,
                            '--fps','30','--max','3','--diff','0'])
     images=json.load(open(os.path.join(image_out,'images.json')))
     assert images['state']=='complete' and len(set(x['name'] for x in images['images']))==3
@@ -155,7 +155,7 @@ try:
         msg.header.stamp=rospy.Time.from_sec(28.); msg.header.seq=3
         bag.write(extract_images.RGB,msg,rospy.Time.from_sec(39.))
     png_out=os.path.join(scratch,'png')
-    subprocess.check_call(['python2',os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
+    subprocess.check_call([sys.executable,os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
         png_out,'--format','png','--time-source','record','--diff','0','--fps','1'])
     png_manifest=json.load(open(os.path.join(png_out,'images.json')))
     assert png_manifest['state']=='complete' and len(png_manifest['images'])==4
@@ -166,8 +166,8 @@ try:
         assert item['name'].endswith('.png')
         assert np.array_equal(np.asarray(PillowImage.open(os.path.join(png_out,item['name']))),pixels)
     failed_out=os.path.join(scratch,'header_reset')
-    proc=subprocess.Popen(['python2',os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
-        failed_out,'--diff','0'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    proc=subprocess.Popen([sys.executable,os.path.join(ROOT,'semantic','extract_images.py'),reset_path,
+        failed_out,'--diff','0'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
     proc.communicate(); assert proc.returncode!=0
     failed=json.load(open(os.path.join(failed_out,'images.json')))
     assert failed['state']=='failed' and 'regressed' in failed['error']
